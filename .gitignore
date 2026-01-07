@@ -1,0 +1,25 @@
+# --- 1. 虚拟环境 (Virtual Environments) ---
+.venv/
+venv/
+backend/venv/
+
+# --- 2. 数据库与本地存储 (Data & Storage) ---
+# 屏蔽你提到的根目录 data 文件夹
+data/
+# 屏蔽 backend 下可能产生的 db
+backend/*.db
+backend/chroma_db/
+
+# --- 3. 前端依赖与产物 (Frontend) ---
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+*.local
+
+# --- 4. 系统与日志 (System & Logs) ---
+.DS_Store
+logs
+*.log
+__pycache__/
+.vscode/
+node_modules

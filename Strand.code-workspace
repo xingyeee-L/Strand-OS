@@ -1,0 +1,28 @@
+{
+	"folders": [
+		{
+			"path": "backend/app",
+			"name": "app"
+		},
+		{
+			"path": "frontend/src",
+			"name": "src"
+		},
+		{
+			"path": ".",
+			"name": "STRAND"
+		}
+	],
+    // 🔥👇 添加这部分设置 👇🔥
+	"settings": {
+        // 告诉 Python：解析代码时，把 backend 文件夹也算作根目录
+        // 这样 "from app.core..." 就能被正确识别了
+		"python.analysis.extraPaths": [
+			"${workspaceFolder:STRAND}/backend"
+		],
+        // 让 CSS 识别 Tailwind 的 @ 规则
+        "css.validate": false,
+        "less.validate": false,
+        "scss.validate": false
+	}
+}

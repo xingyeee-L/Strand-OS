@@ -1,0 +1,23 @@
+# --- Web 框架 ---
+fastapi
+uvicorn[standard]
+python-multipart
+
+# --- 数据库 & ORM ---
+sqlmodel          # 基于 Pydantic 的 SQL 库，极其好用
+chromadb          # 向量数据库
+
+# --- AI & 编排 ---
+langchain
+langchain-community
+langchain-huggingface
+langchain-chroma
+ollama            # 调用本地 Llama 3.1
+
+# --- 算法雷达 ---
+rapidfuzz         # 形态扫描 (编辑距离)
+metaphone         # 语音扫描 (发音算法)
+sentence-transformers
+# --- 文件处理 ---
+pypdf             # 读 PDF
+unstructured      # 读 Word/PPT 等复杂文档

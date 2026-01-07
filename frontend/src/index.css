@@ -1,0 +1,15 @@
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 强制黑色背景，沉浸式体验 */
+body {
+  background-color: #000;
+  margin: 0;
+  overflow: hidden;
+}
+@keyframes scan {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100%); }
+}
