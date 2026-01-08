@@ -19,6 +19,10 @@ interface UserProfile {
   current_xp: number;
   next_level_xp: number;
 }
+export interface MissionTarget {
+    word: string;
+    reviewed: boolean;
+}
 
 export interface Mission {
   id: number;
@@ -26,6 +30,7 @@ export interface Mission {
   status: string;
   xp_reward: number;
   target_words: string[];
+  targets: MissionTarget[]; // 🔥 新字段
 }
 
 interface GameState {
@@ -41,8 +46,14 @@ interface GameState {
   activeNodeId: string | null;
   lastNarrative: string | null;
   hoveredNodeId: string | null; // 当前悬停的节点ID
+  availableBooks: string[];
+  currentBook: string | null;
+  bookProgress: number;
 
   // 动作
+  fetchBooks: () => Promise<void>;
+  setBook: (bookName: string) => Promise<void>;
+  requestExtraMission: () => Promise<void>;
   initWorld: () => Promise<void>;
   // 🔥 更新：支持 definition 参数
   saveNote: (note: string) => Promise<void>;
@@ -57,7 +68,8 @@ interface GameState {
   // 添加这一行
   deleteCurrentNode: () => Promise<void>;
   setHoveredNodeId: (id: string | null) => void;
-  
+  completeMission: (word: string) => Promise<void>;
+  cancelMission: (missionId: number) => Promise<void>;
 }
 
 const ORBIT_RADIUS = 18; 
@@ -75,24 +87,104 @@ export const useGameStore = create<GameState>((set, get) => ({
   activeNodeId: null,
   lastNarrative: null,
   hoveredNodeId: null,
+  availableBooks: [],
+  currentBook: null,
+  bookProgress: 0,
 
   setLastNarrative: (text) => set({ lastNarrative: text }),
   setActiveNode: (id) => set({ activeNodeId: id }),
   setHoveredNodeId: (id) => set({ hoveredNodeId: id }),
+  // 在 useGameStore 实现中：
+  cancelMission: async (missionId: number) => {
+    // 战术建议：增加一个简单的确认，防止手滑
+    if (!window.confirm("TERMINATE THIS MISSION? 所有进度将丢失。")) return;
+
+    try {
+        await axios.delete(`http://127.0.0.1:8000/missions/${missionId}`);
+        // 刷新列表
+        await get().fetchMissions();
+        console.log(`[Mission] Protocol ${missionId} terminated.`);
+    } catch (e) {
+        console.error("Failed to abort mission", e);
+    }
+  },
+  fetchBooks: async () => {
+    const res = await axios.get('http://127.0.0.1:8000/books/list');
+    const userRes = await axios.get('http://127.0.0.1:8000/user/profile');
+    set({ 
+        availableBooks: res.data,
+        currentBook: userRes.data.current_book,
+        bookProgress: userRes.data.book_progress_index
+    });
+  },
+
+  setBook: async (bookName) => {
+    await axios.post(`http://127.0.0.1:8000/user/set_book?book_name=${bookName}`);
+    set({ currentBook: bookName });
+    await get().fetchMissions();
+  },
+  requestExtraMission: async () => {
+    try {
+        await axios.post('http://127.0.0.1:8000/missions/add_extra');
+        await get().fetchMissions(); // 刷新列表
+    } catch (e) {
+        console.error("Extra mission failed", e);
+    }
+},
+completeMission: async (word: string) => {
+    try {
+        const res = await axios.post('http://127.0.0.1:8000/mission/complete_word', { word });
+        
+        if (res.data.status === 'reviewed') {
+            // 1. 刷新任务列表 (为了右上角的 MissionBoard)
+            await get().fetchMissions();
+            
+            // 2. 🔥 [关键修复]：更新 centerNode 状态，让按钮消失
+            const { centerNode } = get();
+            if (centerNode && centerNode.id === word) {
+                set({ 
+                    centerNode: { 
+                        ...centerNode, 
+                        is_mission_target: false // 强制关闭标记
+                    } 
+                });
+            }
+            
+            // 3. 刷新 User XP
+            const userRes = await axios.get('http://127.0.0.1:8000/user/profile');
+            set({ user: userRes.data });
+        }
+    } catch (e) {
+        console.error("Mission completion failed", e);
+    }
+  },
   initWorld: async () => {
+    // 1. 初始化位置
     await get().jumpTo("fernweh", [0, 0, 0]);
+    
+    // 2. 🔥 [新增] 触发每日任务生成 (后端会自己判断今天是否已生成)
+    try {
+        await axios.post('http://127.0.0.1:8000/missions/generate');
+        console.log("[Mission] Daily missions check completed.");
+    } catch (e) {
+        console.warn("[Mission] Failed to generate missions:", e);
+    }
+
+    // 3. 拉取最新任务列表
     await get().fetchMissions();
   },
 
-  // 🔥 [核心引擎] 星系跳跃 & 节点创建
+// 🔥 [核心引擎] 星系跳跃 & 节点创建
   jumpTo: async (word: string, targetPos?: [number, number, number], definition?: string) => {
     if (!word) return;
     set({ isScanning: true });
     
     // A. 坐标计算
+    // 如果没有指定落点，默认在当前中心点侧前方生成
     let currentPos = targetPos;
     if (!currentPos) {
         const existingNode = get().neighbors.find(n => n.id === word);
+        // 如果是已存在的卫星，直接飞过去；否则新开辟坐标
         currentPos = existingNode ? existingNode.position : [
             (get().centerNode?.position[0] || 0) + 10, 
             0, 
@@ -101,39 +193,49 @@ export const useGameStore = create<GameState>((set, get) => ({
     }
 
     try {
-      console.log("[Store] Jumping to:", word); // 日志 A
+      console.log("[Store] Jumping to:", word);
+
+      // B. 并行请求：获取星系数据 & 用户状态
+      // 传递 definition 确保新词能直接带入释义
       const [graphRes, userRes] = await Promise.all([
-        axios.post('http://127.0.0.1:8000/graph/context', { word, definition }),
+        axios.post('http://127.0.0.1:8000/graph/context', { 
+            word, 
+            definition 
+        }),
         axios.get('http://127.0.0.1:8000/user/profile')
       ]);
 
-      console.log("[Store] Data received:", graphRes.data); // 日志 B
-
       const { center, neighbors } = graphRes.data;
       
-      // 检查 center 是否存在
+      // 熔断：如果后端没返回中心节点，终止
       if (!center) {
-          console.error("[Store] Center node is missing in response!");
+          console.error("[Store] Center node missing!");
           set({ isScanning: false });
           return;
       }
 
-      // C. 布局计算
+      // C. 布局计算：将相对坐标转换为世界绝对坐标
       const layoutNeighbors = neighbors.map((n: any, index: number) => {
-        const total = neighbors.length;
-        const angle = (index / total) * Math.PI * 2;
+        // 后端返回的是 [relX, 0, relZ]，基于 (0,0)
+        // 我们要把它加到 currentPos 上
+        // 如果后端没算坐标（理论上不会），默认用圆形分布
+        const [rx, , rz] = n.position || [
+            ORBIT_RADIUS * Math.cos((index / neighbors.length) * Math.PI * 2), 
+            0, 
+            ORBIT_RADIUS * Math.sin((index / neighbors.length) * Math.PI * 2)
+        ];
         
         return {
           ...n,
           position: [
-            currentPos![0] + ORBIT_RADIUS * Math.cos(angle),
-            0, 
-            currentPos![2] + ORBIT_RADIUS * Math.sin(angle)
+            currentPos![0] + rx, 
+            0, // Y轴由前端地形计算，这里填0
+            currentPos![2] + rz
           ]
         };
       });
 
-      // D. 更新状态
+      // D. 更新全局状态
       set({ 
         centerNode: { ...center, position: currentPos }, 
         neighbors: layoutNeighbors,
@@ -142,6 +244,10 @@ export const useGameStore = create<GameState>((set, get) => ({
         lastNarrative: null,
         activeNodeId: word
       });
+
+      // 🔥 [新增] 自动深扫逻辑 (Auto Odradek)
+      // 如果是拓荒新词（没有邻居），自动触发后台深度扫描
+     console.log(`[Cruise] Jump to ${word} completed.`);
       
     } catch (error) {
       console.error("Jump failed:", error);
@@ -277,7 +383,7 @@ export const useGameStore = create<GameState>((set, get) => ({
     }
   },
   // 在 return 对象中实现:
-deleteCurrentNode: async () => {
+  deleteCurrentNode: async () => {
     const { centerNode } = get();
     if (!centerNode) return;
     
@@ -298,7 +404,7 @@ deleteCurrentNode: async () => {
         console.error("Voidout failed:", e);
         alert("销毁失败，数据残留。");
     }
-},
+  },
 
   uploadFile: async (file) => {
     const formData = new FormData();

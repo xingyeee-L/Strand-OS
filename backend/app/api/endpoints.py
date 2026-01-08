@@ -2,6 +2,7 @@ import json
 import os
 import shutil
 from datetime import date
+from datetime import datetime, timedelta
 from typing import List, Dict, Any
 from rapidfuzz import fuzz 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks
@@ -17,6 +18,8 @@ from app.models.schemas import (
 from app.services.brain import BrainService
 from langchain_core.documents import Document
 import uuid # 🔥 导入 UUID 库用于生成唯一标识
+import random # 🔥 记得导入
+from app.services.book_service import BookService
 
 
 # 临时定义 DTO
@@ -29,79 +32,85 @@ router = APIRouter()
 UPLOAD_DIR = "../data/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# ==========================================
-# 1. 核心交互接口 (星系跳跃 / 扫描)
-# ==========================================
+# -------------------------------------------------------
+# 1. 核心交互接口 (星系跳跃 / 扫描 / 虚拟预览)
+# -------------------------------------------------------
 @router.post("/graph/context", response_model=GraphContextDTO)
 def get_graph_context(request: ScanRequest, session: Session = Depends(get_session)):
     """
-    [星系视图] 核心接口：跳转或创建节点。
+    [星系视图] 核心接口：
+    1. 尝试获取真实节点。
+    2. 如果没有（拓荒新词），构建【虚拟节点】供预览，不存库。
+    3. 如果有定义更新，执行融合。
     """
-    # 🔥 修复点 1：必须先定义 target！
     target = request.word.lower().strip()
     
-    # A. 获取或创建中心词
+    # A. 获取真实节点
     center_node = session.get(WordNode, target)
     
-    # [融合逻辑] 处理前端传来的定义
+    # 🔥 [虚拟模式分支]：如果是新词，且没有明确要求创建（普通跳转/任务预览）
+    if not center_node:
+        # 1. 确定释义 (前端传来的 > 实时查的)
+        definition = request.definition
+        if not definition:
+            # 实时查一下，为了显示给用户看，但别存
+            definition = BrainService.fetch_smart_definition(target)
+            
+        # 2. 检查是否为今日任务目标
+        today_str = str(date.today())
+        missions = session.exec(select(MissionLog).where(MissionLog.date == today_str)).all()
+        target_ids = set()
+        for m in missions:
+            try: target_ids.update(json.loads(m.target_words))
+            except: pass
+            
+        # 3. 返回虚拟 DTO (注意：没有 session.add)
+        # 虚拟节点的邻居暂时为空，除非用户手动点 Odradek
+        return GraphContextDTO(
+            center=NodeDTO(
+                id=target,
+                content=definition, # 查到的定义
+                mastery_level=0,    # 0级，未收录
+                is_mission_target=(target in target_ids),
+                note=None,
+                position=None
+            ),
+            neighbors=[] 
+        )
+
+    # --- 以下是【真实节点】的处理逻辑 ---
+
+    # B. 释义融合 (如果前端传了更准的定义)
     if request.definition:
         new_def = request.definition.strip()
-        if not center_node:
-            print(f"[Brain] Constructing new node: {target}")
-            ety = '{"lang":"UNKNOWN", "roots":[], "prefixes":[], "suffixes":[]}'
-            center_node = WordNode(
-                id=target, 
-                content=new_def, 
-                etymology=ety, 
-                phonetic_code=doublemetaphone(target)[0],
-                mastery_level=0
-            )
+        current_content = center_node.content or ""
+        # 简单查重：如果新定义不在旧定义里
+        if new_def not in current_content:
+            print(f"[Brain] Fusing node definition: {target}")
+            center_node.content = f"{current_content} | {new_def}"
             session.add(center_node)
             session.commit()
             session.refresh(center_node)
-        else:
-            current_content = center_node.content or ""
-            if new_def not in current_content:
-                center_node.content = f"{current_content} | {new_def}"
-                session.add(center_node)
-                session.commit()
-                session.refresh(center_node)
 
-    # 兜底创建
-    if not center_node:
-         definition = BrainService.fetch_smart_definition(target)
-         center_node = WordNode(
-            id=target, content=definition, etymology="", 
-            phonetic_code=doublemetaphone(target)[0], mastery_level=0
-         )
-         session.add(center_node)
-         session.commit()
-         session.refresh(center_node)
-
-    # 🔥 修复点 2：获取该单词的笔记碎片 (RAG 模式)
+    # C. 捞取笔记 (RAG)
     note_source = f"NOTE:{target}"
-    note_frag = session.exec(
-        select(KnowledgeFragment).where(KnowledgeFragment.source_file == note_source)
-    ).first()
+    note_frag = session.exec(select(KnowledgeFragment).where(KnowledgeFragment.source_file == note_source)).first()
     current_note = note_frag.content if note_frag else None
 
-    # B. 扫描周围节点 (极速巡航模式)
+    # D. 扫描邻居 (极速版)
     scan_data = BrainService.scan_network_logic(target, session)
     
-    # C. 获取物理连接 (已建成的)
+    # E. 获取物理连接
     existing_links = session.exec(select(NeuralLink).where(
         (NeuralLink.source_id == target) | (NeuralLink.target_id == target)
     )).all()
     
-    # D. 组装邻居列表
+    # F. 组装数据
     neighbors_map = {}
     
-    # 1. 处理已连接的 (NeuralLink)
+    # 1. 物理连接
     for link in existing_links:
         neighbor_id = link.target_id if link.source_id == target else link.source_id
-        
-        # 🔥 [关键过滤]：只加载 WordNode 表里的东西
-        # 即使 NeuralLink 里记录了 NOTE:xxx，因为 WordNode 里查不到这个 ID，所以会被自动过滤
         node = session.get(WordNode, neighbor_id)
         if node:
             neighbors_map[neighbor_id] = {
@@ -113,15 +122,12 @@ def get_graph_context(request: ScanRequest, session: Session = Depends(get_sessi
                 "mastery_level": node.mastery_level
             }
             
-    # 2. 处理潜在扫描的 (Scan Data)
+    # 2. 潜在扫描 (排除 NOTE)
     for type_name, ids in scan_data.items():
         for nid in ids:
-            # 🔥 [关键过滤]：排除以 "NOTE:" 开头的 ID
             if nid.startswith("NOTE:"): continue 
-            
             if nid not in neighbors_map:
                 node = session.get(WordNode, nid)
-                # 只有 WordNode 存在的才显示，防止显示幽灵节点
                 if node: 
                     neighbors_map[nid] = {
                         "id": nid,
@@ -132,36 +138,36 @@ def get_graph_context(request: ScanRequest, session: Session = Depends(get_sessi
                         "mastery_level": node.mastery_level
                     }
 
-    # E. 计算向日葵分布坐标
+    # G. 计算向日葵坐标
     final_neighbors = []
     for idx, (nid, data) in enumerate(neighbors_map.items()):
         coord_json = BrainService.generate_distributed_coordinates(nid, idx)
-        coord = json.loads(coord_json)
         n_dict = data.copy()
-        n_dict['position'] = coord
+        n_dict['position'] = json.loads(coord_json)
         final_neighbors.append(n_dict)
 
-    # F. 任务检查
+    # H. 任务状态
     today_str = str(date.today())
     missions = session.exec(select(MissionLog).where(MissionLog.date == today_str)).all()
     target_ids = set()
     for m in missions:
-        try: 
-            for t in json.loads(m.target_words): target_ids.add(t)
-        except: continue
+        try: target_ids.update(json.loads(m.target_words))
+        except: pass
 
-    # 🔥 修复点 3：返回 NodeDTO 时带上从碎片表捞出来的笔记
     return GraphContextDTO(
         center=NodeDTO(
             id=center_node.id,
             content=center_node.content,
             mastery_level=center_node.mastery_level,
             is_mission_target=(center_node.id in target_ids),
-            note=current_note, # <--- 关键
+            note=current_note,
             position=None
         ),
         neighbors=final_neighbors
     )
+
+
+
 
 # ==========================================
 # 2. 深度扫描接口 (异步 Odradek)
@@ -339,17 +345,6 @@ def get_user_profile(session: Session = Depends(get_session)):
         session.commit()
     return user
 
-@router.get("/missions/daily")
-def get_daily_missions(session: Session = Depends(get_session)):
-    today = str(date.today())
-    missions = session.exec(select(MissionLog).where(MissionLog.date == today)).all()
-    result = []
-    for m in missions:
-        try: target_list = json.loads(m.target_words)
-        except: target_list = []
-        result.append({"id": m.id, "type": m.type, "status": m.status, "xp_reward": m.xp_reward, "target_words": target_list})
-    return result
-
 @router.post("/knowledge/upload")
 async def upload_knowledge(file: UploadFile = File(...), session: Session = Depends(get_session)):
     file_path = os.path.join(UPLOAD_DIR, file.filename)
@@ -378,3 +373,307 @@ async def upload_knowledge(file: UploadFile = File(...), session: Session = Depe
     if chroma_docs: get_vector_store().add_documents(chroma_docs)
     session.commit()
     return {"status": "success", "chunks": len(splits)}
+# ==========================================
+# 8. 任务系统接口 (SRS Mission System)
+# ==========================================
+# ... import ...
+
+@router.post("/missions/generate")
+def generate_daily_missions(session: Session = Depends(get_session)):
+    """
+    [任务生成器 v2.0]
+    逻辑：1. 先查复习任务 -> 2. 若配额未满，从词书取拓荒任务
+    """
+    today_str = str(date.today())
+    
+    # 1. 查重：防止今日重复生成
+    existing = session.exec(select(MissionLog).where(
+        (MissionLog.date == today_str)
+    )).first()
+    if existing:
+        return {"status": "exists", "message": "Missions already generated for today."}
+
+    # --- 核心配置：每日配额 ---
+    DAILY_QUOTA = 10  # 每天总共背/复习 10 个词
+    
+    # 2. 获取当前用户
+    user = session.get(UserProfile, 1)
+    if not user:
+        # 兜底：如果没有用户，创建一个
+        user = UserProfile(id=1, username="Sam")
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+
+    # --- A. 第一阶段：筛选复习任务 (Review) ---
+    now = datetime.utcnow()
+    # 查找：过期词 或 从未复习过的本地词
+    review_statement = select(WordNode).where(
+        (WordNode.next_review <= now) | (WordNode.next_review == None)
+    ).limit(DAILY_QUOTA)
+    
+    review_candidates = session.exec(review_statement).all()
+    review_ids = [n.id for n in review_candidates]
+    
+    # --- B. 第二阶段：补充拓荒任务 (Exploration) ---
+    # 🔥 [修复关键]：明确计算剩余配额
+    slots_left = DAILY_QUOTA - len(review_ids)
+    explore_ids = []
+
+    if slots_left > 0 and user.current_book:
+        print(f"[Mission] Quota remaining: {slots_left}. Fetching from {user.current_book}...")
+        
+        # 从 BookService 取词
+        new_words = BookService.fetch_new_words(
+            user.current_book, 
+            user.book_progress_index, 
+            slots_left
+        )
+        
+        # 将新词加入列表（不创建 WordNode，保持数据库洁癖）
+        explore_ids = new_words
+        
+        # 更新用户词书进度
+        user.book_progress_index += len(new_words)
+        session.add(user)
+
+    # --- C. 第三阶段：保存任务日志 ---
+    # 我们将任务拆分为两条记录，方便前端区分展示
+    if review_ids:
+        session.add(MissionLog(
+            date=today_str, 
+            type="review", 
+            target_words=json.dumps(review_ids),
+            status="active", 
+            xp_reward=len(review_ids) * 10
+        ))
+        
+    if explore_ids:
+        session.add(MissionLog(
+            date=today_str, 
+            type="explore", 
+            target_words=json.dumps(explore_ids),
+            status="active", 
+            xp_reward=len(explore_ids) * 20 # 拓荒奖励更高
+        ))
+        
+    session.commit()
+    
+    return {
+        "status": "created", 
+        "review_count": len(review_ids), 
+        "explore_count": len(explore_ids)
+    }
+
+@router.get("/missions/daily")
+def get_daily_missions(session: Session = Depends(get_session)):
+    today = str(date.today())
+    missions = session.exec(select(MissionLog).where(MissionLog.date == today)).all()
+    result = []
+    
+    for m in missions:
+        try: target_list = json.loads(m.target_words)
+        except: target_list = []
+        
+        # 🔥 [关键]：构建 rich targets
+        rich_targets = []
+        for word in target_list:
+            node = session.get(WordNode, word)
+            is_reviewed = False
+            # 检查最后复习时间是否是今天
+            if node and node.last_review and node.last_review.date() == date.today():
+                is_reviewed = True
+            
+            rich_targets.append({"word": word, "reviewed": is_reviewed})
+
+        result.append({
+            "id": m.id, 
+            "type": m.type, 
+            "status": m.status, 
+            "xp_reward": m.xp_reward, 
+            "targets": rich_targets # 🔥 必须叫 targets，对应前端接口
+        })
+        
+    return result
+
+# -------------------------------------------------------
+# 9. 任务完成接口 (正式收录 / 复习打卡)
+# -------------------------------------------------------
+@router.post("/mission/complete_word")
+def complete_review_word(request: ScanRequest, session: Session = Depends(get_session)):
+    """
+    [原子操作] 用户标记单词“已掌握/已复习”。
+    如果是新词（虚拟节点），在此刻正式创建入库。
+    """
+    target = request.word.lower().strip()
+    node = session.get(WordNode, target)
+    
+    # 🔥 [核心逻辑]：如果是新词，正式收录 (Induction)
+    if not node:
+        print(f"[Mission] Formally inducting new word: {target}")
+        # 补全释义
+        definition = BrainService.fetch_smart_definition(target)
+        # 补全词源 (稍微花点时间，值得)
+        ety = BrainService.analyze_etymology(target)
+        
+        node = WordNode(
+            id=target,
+            content=definition,
+            etymology=ety,
+            phonetic_code=doublemetaphone(target)[0],
+            mastery_level=1, # 初始等级 1
+            review_stage=0,  # 初始复习阶段
+            created_at=datetime.utcnow(),
+            last_review=datetime.utcnow(),
+            next_review=datetime.utcnow() + timedelta(days=1) # 明天复习
+        )
+        session.add(node)
+    
+    else:
+        # 旧词逻辑：更新复习时间
+        next_date, next_stage = BrainService.calculate_next_review(node.review_stage)
+        node.last_review = datetime.utcnow()
+        node.next_review = next_date
+        node.review_stage = next_stage
+        session.add(node)
+    
+    # 2. 发放奖励 (Instant Gratification)
+    user = session.get(UserProfile, 1)
+    xp_gain = 10 
+    user.current_xp += xp_gain
+    
+    # 3. 检查全勤奖
+    today_str = str(date.today())
+    active_mission = session.exec(select(MissionLog).where(
+        (MissionLog.date == today_str) & (MissionLog.status == "active")
+    )).first()
+    
+    mission_completed = False
+    if active_mission:
+        targets = json.loads(active_mission.target_words)
+        if target in targets:
+            # 检查是否全部完成 (需查询所有目标词的状态)
+            all_done = True
+            for t in targets:
+                t_node = session.get(WordNode, t)
+                # 判定标准：最后复习日期 == 今天
+                if not t_node or not t_node.last_review or t_node.last_review.date() != date.today():
+                    all_done = False
+                    break
+            
+            if all_done:
+                active_mission.status = "completed"
+                session.add(active_mission)
+                bonus_xp = 50 
+                user.current_xp += bonus_xp
+                mission_completed = True
+                xp_gain += bonus_xp
+
+    # 4. 升级判定
+    if user.current_xp >= user.next_level_xp:
+        user.level += 1
+        user.next_level_xp = int(user.next_level_xp * 1.5)
+
+    session.add(user)
+    session.commit()
+    
+    return {
+        "status": "reviewed", 
+        "word": target, 
+        "xp_gained": xp_gain, 
+        "mission_completed": mission_completed
+    }
+
+
+@router.post("/missions/add_extra")
+def add_extra_mission(session: Session = Depends(get_session)):
+    """
+    [主动加练] 用户手动请求额外的复习任务
+    """
+    # 1. 策略：优先找还没复习的，或者 mastery_level 低的
+    # 如果都复习完了，就随机抽查
+    candidates = session.exec(select(WordNode)).all()
+    
+    # 过滤：排除今天已经生成的任务词（避免重复）
+    today = str(date.today())
+    today_missions = session.exec(select(MissionLog).where(MissionLog.date == today)).all()
+    today_words = set()
+    for m in today_missions:
+        try: today_words.update(json.loads(m.target_words))
+        except: pass
+        
+    valid_candidates = [n.id for n in candidates if n.id not in today_words]
+    
+    if not valid_candidates:
+        return {"status": "empty", "message": "No words available for review."}
+    
+    # 随机选 3 个
+    count = min(3, len(valid_candidates))
+    target_ids = random.sample(valid_candidates, count)
+    
+    # 创建新任务
+    mission = MissionLog(
+        date=today,
+        type="extra_review",
+        target_words=json.dumps(target_ids),
+        status="active",
+        xp_reward=50 # 加练奖励少一点
+    )
+    session.add(mission)
+    session.commit()
+    
+    return {"status": "created", "targets": target_ids}
+
+@router.get("/books/list")
+def list_books():
+    books = BookService.get_available_books() # ["IELTS.txt", ...]
+    # 简单的读一下行数
+    rich_books = []
+    for b in books:
+        path = os.path.join("backend/books", b) # 注意路径
+        try:
+            with open(path, 'r') as f:
+                count = sum(1 for _ in f)
+            rich_books.append({"name": b, "total": count})
+        except:
+            rich_books.append({"name": b, "total": 0})
+    return rich_books
+
+@router.post("/user/set_book")
+def set_user_book(book_name: str, session: Session = Depends(get_session)):
+    user = session.get(UserProfile, 1)
+    if book_name not in BookService.get_available_books():
+         raise HTTPException(404, detail="Book not found")
+         
+    user.current_book = book_name
+    # 切换书时，通常不需要重置进度，除非你想从头背
+    session.add(user)
+    session.commit()
+    
+    # 🔥 [新增]：立即尝试生成/补充今日任务
+    # 调用 generate_daily_missions 逻辑
+    # 注意：generate_daily_missions 需要 session，我们可以直接在这里复用逻辑，或者调用函数
+    # 这里为了简单，直接调用函数（假设都在 endpoints.py 里）
+    try:
+        generate_daily_missions(session)
+    except Exception as e:
+        print(f"[WARN] Auto-generate mission failed: {e}")
+        
+    return {"status": "success", "current_book": book_name}
+# ==========================================
+# 9. 任务终止接口 (Abort Mission)
+# ==========================================
+@router.delete("/missions/{mission_id}")
+def cancel_mission(mission_id: int, session: Session = Depends(get_session)):
+    """
+    [任务中止] 彻底删除一条任务记录
+    """
+    mission = session.get(MissionLog, mission_id)
+    if not mission:
+        raise HTTPException(status_code=404, detail="Mission log not found.")
+
+    session.delete(mission)
+    session.commit()
+    
+    print(f"[SYSTEM] Mission {mission_id} has been aborted.")
+    return {"status": "cancelled", "id": mission_id}

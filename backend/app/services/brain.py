@@ -6,6 +6,7 @@ import re
 import jieba
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
+from datetime import datetime, timedelta
 from rapidfuzz import process, fuzz
 from metaphone import doublemetaphone
 from sqlmodel import select, Session
@@ -326,11 +327,40 @@ class BrainService:
 
     @staticmethod
     def fetch_smart_definition(word: str) -> str:
-        """(兼容用) 快速获取单一释义"""
+        """
+        [巡航版] 快速获取释义
+        🔥 绝对不调用 LLM，仅使用云端字典 API。如果 API 失败，返回占位符。
+        """
         hits = BrainService.fetch_dual_candidates(word)
-        if not hits: return "暂无数据"
-        return f"[DE] {hits[0]['definition']}" if hits[0]['lang'] == 'DE' else hits[0]['definition']
-
+        if not hits: 
+            return "SIGNAL LOST: 暂无即时数据。请执行 ODRADEK 深度扫描。"
+        
+        # 优先返回德语（如果存在），否则返回第一个
+        for hit in hits:
+            if hit['lang'] == 'DE': return f"[DE] {hit['definition']}"
+        
+        return hits[0]['definition']
+    # -------------------------------------------------------
+    # 🧠 [SRS 引擎] 艾宾浩斯间隔算法 (简化版)
+    # -------------------------------------------------------
+    @staticmethod
+    def calculate_next_review(current_stage: int) -> tuple[datetime, int]:
+        """
+        根据当前阶段计算下次复习时间。
+        间隔策略：0 -> 1天 -> 3天 -> 7天 -> 15天 -> 30天 -> 60天
+        """
+        now = datetime.utcnow()
+        intervals = [1, 3, 7, 15, 30, 60] # 天数
+        
+        if current_stage >= len(intervals):
+            days = 90 # 满级后每90天复习一次
+            next_stage = current_stage # 封顶
+        else:
+            days = intervals[current_stage]
+            next_stage = current_stage + 1
+            
+        next_date = now + timedelta(days=days)
+        return next_date, next_stage
     @staticmethod
     def generate_narrative(source: str, target: str, link_type: str, context: str = "") -> str:
         """战术剧情生成：科幻、极简、电报体"""

@@ -11,6 +11,10 @@ class WordNode(SQLModel, table=True):
     phonetic_code: Optional[str] = None
     mastery_level: int = 0
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    # 🔥 [SRS 核心字段]
+    last_review: Optional[datetime] = None  # 上次复习时间
+    next_review: Optional[datetime] = None  # 下次复习时间
+    review_stage: int = 0                   # 当前阶段 (0=新词, 1=1天, 2=3天...)
 
 class KnowledgeFragment(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -33,13 +37,15 @@ class UserProfile(SQLModel, table=True):
     level: int = 1
     current_xp: int = 0
     next_level_xp: int = 100
+    current_book: Optional[str] = None       # 例如 "IELTS.txt"
+    book_progress_index: int = 0             # 当前读到第几行
 
 class MissionLog(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     date: str 
-    type: str 
-    target_words: str 
-    status: str = "active"
+    type: str # 'review' | 'explore'
+    target_words: str # JSON 列表: ["apple", "banana"]
+    status: str = "active" # 'active' | 'completed'
     xp_reward: int = 100
 
 # --- DTOs ---
