@@ -40,6 +40,7 @@ interface GameState {
   scanResult: any;
   activeNodeId: string | null;
   lastNarrative: string | null;
+  hoveredNodeId: string | null; // 当前悬停的节点ID
 
   // 动作
   initWorld: () => Promise<void>;
@@ -55,6 +56,7 @@ interface GameState {
   performDeepScan: () => Promise<void>;
   // 添加这一行
   deleteCurrentNode: () => Promise<void>;
+  setHoveredNodeId: (id: string | null) => void;
   
 }
 
@@ -72,10 +74,11 @@ export const useGameStore = create<GameState>((set, get) => ({
   scanResult: null,
   activeNodeId: null,
   lastNarrative: null,
+  hoveredNodeId: null,
 
   setLastNarrative: (text) => set({ lastNarrative: text }),
   setActiveNode: (id) => set({ activeNodeId: id }),
-
+  setHoveredNodeId: (id) => set({ hoveredNodeId: id }),
   initWorld: async () => {
     await get().jumpTo("fernweh", [0, 0, 0]);
     await get().fetchMissions();

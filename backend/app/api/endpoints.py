@@ -95,8 +95,13 @@ def get_graph_context(request: ScanRequest, session: Session = Depends(get_sessi
     
     # D. 组装邻居列表
     neighbors_map = {}
+    
+    # 1. 处理已连接的 (NeuralLink)
     for link in existing_links:
         neighbor_id = link.target_id if link.source_id == target else link.source_id
+        
+        # 🔥 [关键过滤]：只加载 WordNode 表里的东西
+        # 即使 NeuralLink 里记录了 NOTE:xxx，因为 WordNode 里查不到这个 ID，所以会被自动过滤
         node = session.get(WordNode, neighbor_id)
         if node:
             neighbors_map[neighbor_id] = {
@@ -108,18 +113,24 @@ def get_graph_context(request: ScanRequest, session: Session = Depends(get_sessi
                 "mastery_level": node.mastery_level
             }
             
+    # 2. 处理潜在扫描的 (Scan Data)
     for type_name, ids in scan_data.items():
         for nid in ids:
+            # 🔥 [关键过滤]：排除以 "NOTE:" 开头的 ID
+            if nid.startswith("NOTE:"): continue 
+            
             if nid not in neighbors_map:
                 node = session.get(WordNode, nid)
-                neighbors_map[nid] = {
-                    "id": nid,
-                    "content": node.content if node else "未知信号",
-                    "relation": type_name,
-                    "is_linked": False,
-                    "narrative": None,
-                    "mastery_level": node.mastery_level if node else 0
-                }
+                # 只有 WordNode 存在的才显示，防止显示幽灵节点
+                if node: 
+                    neighbors_map[nid] = {
+                        "id": nid,
+                        "content": node.content,
+                        "relation": type_name,
+                        "is_linked": False,
+                        "narrative": None,
+                        "mastery_level": node.mastery_level
+                    }
 
     # E. 计算向日葵分布坐标
     final_neighbors = []

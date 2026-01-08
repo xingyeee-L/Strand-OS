@@ -26,78 +26,82 @@ export default function NoteEditor({ isOpen, onClose }: NoteEditorProps) {
   return (
     /* 
        外层容器：
-       - fixed inset-0: 占满全屏
-       - z-50: 确保在最上层
-       - pointer-events: 开启时设为 auto，拦截所有点击，防止穿透到 3D 场景
+       - items-center: 让面板垂直居中
+       - pl-4: 左侧留一点点缝隙，增加悬浮感
     */
     <div className={`
-      fixed inset-0 z-50 flex justify-start
+      fixed inset-0 z-50 flex items-center justify-start pl-6
       transition-all duration-500
       ${isOpen ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'}
     `}>
       
-      {/* 🔥 隐形护盾：完全透明，但负责拦截点击并支持“点击空白处关闭” */}
+      {/* 隐形护盾 (点击空白关闭) */}
       <div 
         className="absolute inset-0 bg-transparent cursor-default" 
         onClick={onClose}
       />
 
-      {/* 战术面板主体 */}
+      {/* 战术面板主体 (悬浮卡片式) */}
       <div className={`
-        relative w-80 md:w-96 h-full bg-gray-950/40 backdrop-blur-2xl
-        border-r border-cyan-500/20 shadow-[20px_0_60px_rgba(0,0,0,0.6)]
+        relative w-80 md:w-96 h-[60%] bg-gray-950/60 backdrop-blur-2xl
+        border border-cyan-500/30 rounded-2xl shadow-[20px_0_60px_rgba(0,0,0,0.8)]
         p-8 flex flex-col 
         transform transition-transform duration-700 cubic-bezier(0.16, 1, 0.3, 1)
-        ${isOpen ? 'translate-x-0' : '-translate-x-full'}
+        ${isOpen ? 'translate-x-0' : '-translate-x-[120%]'}
       `}>
         
-        {/* 1. 顶部避让与标题 */}
-        <div className="mt-32 mb-8">
-            <div className="text-[9px] text-cyan-500 font-mono tracking-[0.4em] mb-2 opacity-40">
-                MEMORY_ISOLATION_MODE
+        {/* 装饰：发光边缘 */}
+        <div className="absolute inset-0 rounded-2xl border border-cyan-500/10 pointer-events-none"></div>
+
+        {/* 1. 标题区 */}
+        <div className="mb-6">
+            <div className="flex justify-between items-center mb-2">
+                <div className="text-[9px] text-cyan-500 font-mono tracking-[0.4em] opacity-60">
+                    MEMORY_BANK
+                </div>
+                {/* 关闭小按钮 */}
+                <button onClick={onClose} className="text-cyan-800 hover:text-cyan-400 transition-colors">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
             </div>
-            <h2 className="text-2xl font-black text-white tracking-widest uppercase font-mono flex items-center gap-3">
-                <span className="w-1.5 h-6 bg-cyan-500 shadow-[0_0_15px_rgba(0,255,255,0.6)]"></span>
+            
+            <h2 className="text-3xl font-black text-white tracking-widest uppercase font-mono flex items-center gap-3">
+                <span className="w-1.5 h-8 bg-cyan-500 shadow-[0_0_15px_rgba(0,255,255,0.6)]"></span>
                 {centerNode.id}
             </h2>
-            <div className="h-[1px] w-full bg-gradient-to-r from-cyan-500/30 to-transparent mt-4"></div>
         </div>
 
         {/* 2. 编辑区域 */}
-        <div className="flex-1 flex flex-col relative">
-            <div className="text-[8px] text-cyan-700 mb-2 font-mono tracking-tighter uppercase flex justify-between">
-                <span>// Input_Stream_Locked</span>
+        <div className="flex-1 flex flex-col relative bg-black/40 rounded-lg overflow-hidden border border-white/5 group focus-within:border-cyan-500/30 transition-colors">
+            {/* 顶部标签 */}
+            <div className="bg-cyan-950/30 px-3 py-1 text-[8px] text-cyan-600 font-mono tracking-widest flex justify-between border-b border-white/5">
+                <span>// USER_DATA_ENTRY</span>
                 <span className="animate-pulse">REC●</span>
             </div>
             
             <textarea
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                placeholder="在此注入战术记忆碎片..."
-                className="flex-1 bg-transparent border-l border-cyan-500/10 text-cyan-100 p-4 font-serif text-base focus:outline-none focus:border-cyan-500/30 resize-none leading-relaxed placeholder:opacity-20"
+                placeholder="Writing connection notes..."
+                className="flex-1 bg-transparent text-cyan-100 p-4 font-serif text-base focus:outline-none resize-none leading-relaxed placeholder:opacity-20 scrollbar-thin scrollbar-thumb-cyan-900"
                 autoFocus
             />
         </div>
 
         {/* 3. 底部指令区 */}
-        <div className="mt-8 flex flex-col gap-4">
+        <div className="mt-6">
             <button 
                 onClick={handleSave}
-                className="w-full py-4 bg-cyan-500/5 border border-cyan-500/30 text-cyan-400 font-mono text-xs tracking-[0.3em] hover:bg-cyan-500 hover:text-black transition-all duration-500 uppercase font-bold"
+                className="group w-full py-3 bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 font-mono text-xs tracking-[0.3em] hover:bg-cyan-500 hover:text-black transition-all duration-300 uppercase font-bold rounded flex items-center justify-center gap-3"
             >
-                COMMIT_TO_DATABASE
-            </button>
-            
-            <button 
-                onClick={onClose}
-                className="w-full py-2 text-[9px] font-mono text-gray-600 hover:text-cyan-500 transition-colors tracking-[0.4em]"
-            >
-                [ ABORT_INSCRIPTION ]
+                <span>COMMIT</span>
+                <svg className="w-3 h-3 group-hover:translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
             </button>
         </div>
 
-        {/* 4. 装饰：右侧边缘线 */}
-        <div className="absolute top-0 right-0 h-full w-[1px] bg-gradient-to-b from-transparent via-cyan-500/20 to-transparent"></div>
+        {/* 4. 左侧装饰线 (连接感) */}
+        <div className="absolute top-1/2 left-0 -translate-x-full -translate-y-1/2 w-6 h-[1px] bg-cyan-500/30"></div>
+        <div className="absolute top-1/2 left-0 -translate-x-[2px] -translate-y-1/2 w-1 h-8 bg-cyan-500"></div>
       </div>
     </div>
   );
