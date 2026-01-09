@@ -104,14 +104,13 @@ class BrainService:
     # -------------------------------------------------------
     @staticmethod
     def scan_network_logic(target: str, session: Session):
-        """常规跳转时调用的极速算法。完全不调 LLM，保证毫秒级响应。"""
         target = target.lower()
         target_node = session.get(WordNode, target)
         target_def = target_node.content if target_node else ""
         target_keywords = BrainService._extract_keywords(target_def)
         
-        # 使用 Raw SQL 加速：只取必要列，避免 ORM 对象创建开销
-        query = select(WordNode.id, WordNode.content, WordNode.phonetic_code)
+        # 🔥 优化点 1：Raw SQL 同时加载词源数据
+        query = select(WordNode.id, WordNode.content, WordNode.phonetic_code, WordNode.etymology)
         rows = session.exec(query).all()
         
         all_ids = []
@@ -120,16 +119,15 @@ class BrainService:
             nid = row[0]
             if nid == target: continue 
             all_ids.append(nid)
-            all_data[nid] = {"content": row[1], "phonetic": row[2]}
+            all_data[nid] = {"content": row[1], "phonetic": row[2], "etymology": row[3]}
 
         conns = {"morphology": [], "phonetic": [], "etymology": [], "semantic": []}
 
-        # 1. Morphology (拼写)：短词严(90%)，长词宽(75%)
+        # Morphology & Phonetic 保持不变...
         base_threshold = 95 if len(target) <= 4 else 75
         matches = process.extract(target, all_ids, scorer=fuzz.ratio, limit=5, score_cutoff=base_threshold)
         for w, score, _ in matches: conns["morphology"].append(w)
 
-        # 2. Phonetic (发音)：短词必须全等，长词前缀匹配
         t_code = doublemetaphone(target)[0]
         if t_code:
             for nid in all_ids:
@@ -137,17 +135,27 @@ class BrainService:
                 if n_code and (n_code == t_code if len(target) <= 4 else n_code.startswith(t_code)):
                      if fuzz.ratio(target, nid) > 50: conns["phonetic"].append(nid)
 
-        # 3. Semantic (语义)：关键词交集 (解决跨语言关联的核心)
+        # 🔥 优化点 2：内存词源快速比对
+        if target_node and target_node.etymology:
+            try:
+                t_ety = json.loads(target_node.etymology)
+                t_roots = {r.lower() for r in t_ety.get("roots", []) if len(r) > 2}
+                if t_roots:
+                    for nid, data in all_data.items():
+                        if data["etymology"]:
+                            n_roots = {r.lower() for r in json.loads(data["etymology"]).get("roots", [])}
+                            if t_roots & n_roots: # 集合交集计算
+                                conns["etymology"].append(nid)
+            except: pass
+
+        # Semantic (关键词) 保持不变...
         if target_keywords:
             for nid in all_ids:
-                content = all_data[nid]["content"]
-                if not content: continue
-                # 提取对方关键词并计算交集
-                node_keywords = BrainService._extract_keywords(content)
-                if target_keywords & node_keywords:
-                    conns["semantic"].append(nid)
+                if nid in conns["semantic"]: continue
+                node_keywords = BrainService._extract_keywords(all_data[nid]["content"])
+                if target_keywords & node_keywords: conns["semantic"].append(nid)
 
-        # 4. 向量检索：仅召回最强的近义词 (1.0以内)
+        # 向量检索 (严格模式)
         try:
             vector_store = get_vector_store()
             docs_with_score = vector_store.similarity_search_with_score(target, k=5)
@@ -197,8 +205,7 @@ class BrainService:
                         if vid not in base_conns["semantic"]: base_conns["semantic"].append(vid)
             except Exception as e: print(f"[Worker Error] {e}")
 
-            # 4. 持久化：将计算结果存入 NeuralLink
-            BrainService.save_connections_to_db(target_id, base_conns, session)
+            
             
         print(f"[Background Worker] Deep Scan for {target_id} COMPLETED.")
 
@@ -226,26 +233,38 @@ class BrainService:
         session.commit()
         print(f"[Brain] Persisted {count} new links.")
 
+    # --- 1. 防御性 LLM 裁判 (解决幻觉与解析错误) ---
     @staticmethod
     def llm_judge_connections(target: str, target_def: str, candidates: List[Dict]) -> List[str]:
-        """LLM 裁判：根据逻辑常识判定两个词是否真的相关"""
-        candidates_str = "\n".join([f"- {c['id']}: {c['content'][:50]}" for c in candidates])
+        if not candidates: return []
+        
+        # 为每个候选词建立索引，方便白名单校验
+        candidate_map = {c['id'].lower(): c['id'] for c in candidates}
+        candidates_str = "\n".join([f"- {c['id']}: {c['content'][:40]}" for c in candidates])
+        
         prompt = f"""
-        [Task] Select word IDs related to "{target}" (Synonym/Antonym/Root).
-        [Def] {target_def}
-        [Candidates]
+        [Task] 从列表中筛选出与 "{target}" 具有强逻辑关联（同义/反义/同源）的词。
+        [目标定义] {target_def}
+        [候选列表]
         {candidates_str}
-        [Rule] Return JSON array of strings only.
+        [要求] 
+        1. 只返回 JSON 字符串数组，例如 ["id1", "id2"]。
+        2. 严禁返回列表之外的单词。
+        3. 严禁任何解释说明。
         """
         try:
             res = llm.invoke(prompt)
-            match = re.search(r'\[.*\]', res, re.DOTALL)
-            if match:
-                raw = json.loads(match.group(0))
-                return [str(x if isinstance(x, str) else x.get("id")) for x in raw if x]
+            # 强化解析：提取最后一个 [ ] 块
+            matches = re.findall(r'\[\s*".*?"\s*\]|\[\s*\]', res, re.DOTALL)
+            if matches:
+                raw_list = json.loads(matches[-1])
+                # 🔥 白名单硬过滤：剔除所有幻觉词
+                return [candidate_map[str(vid).lower()] for vid in raw_list if str(vid).lower() in candidate_map]
             return []
-        except: return []
-
+        except Exception as e:
+            print(f"⚠️ [LLM Judge Error] 采用向量召回前3名作为兜底: {e}")
+            return [c['id'] for c in candidates[:3]] # 熔断兜底
+        
     @staticmethod
     def generate_distributed_coordinates(word: str, index: int = 0) -> str:
         """费马螺旋向日葵算法：保证节点均匀分布不重叠"""
@@ -361,17 +380,18 @@ class BrainService:
             
         next_date = now + timedelta(days=days)
         return next_date, next_stage
+    # --- 后台任务与剧情生成逻辑 (已优化) ---
     @staticmethod
     def generate_narrative(source: str, target: str, link_type: str, context: str = "") -> str:
-        """战术剧情生成：科幻、极简、电报体"""
+        type_hint = {"morphology": "拼写对比", "etymology": "词源追溯", "semantic": "语义逻辑"}.get(link_type, "关联分析")
         prompt = f"""
-        [Role] 你是STRAND OS TACTICAL AI.同时亦是一个语言学家，精通德语英语
-        [Task] 分析这两个词的关联 "{source}" <-> "{target}" ({link_type}).
+        [Role] 你是 STRAND OS TACTICAL AI 语言学家。
+        [Task] 极其简短地分析 "{source}" 与 "{target}" 的连接 ({link_type})。
         [Context] {context}
-        [Rule] Sci-fi, 30字以内. Mark (DE) if German.说中文，简短精炼
-        [Example] "词根'port'共振。Import是入，Export是出。"
-        最后输入的结果不用包含上面的提示词
+        [Rule] 绝不输出“这两个词”等废话。中文，25字内。
+        [Output] 直接给出结论。
         """
         try:
-            return llm.invoke(prompt).strip().replace('"', '').split("日志")[-1].strip(": ")
-        except: return f"Link active: {source} ↔ {target}."
+            res = llm.invoke(prompt, stop=["\n"]).strip()
+            return res.split(":")[-1].strip()
+        except: return f"Connection: {source} ↔ {target}."

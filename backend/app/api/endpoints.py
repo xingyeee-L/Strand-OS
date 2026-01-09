@@ -153,6 +153,12 @@ def get_graph_context(request: ScanRequest, session: Session = Depends(get_sessi
     for m in missions:
         try: target_ids.update(json.loads(m.target_words))
         except: pass
+     # 🔥 [关键逻辑] 判定今日是否已同步
+    is_reviewed_today = False
+    if center_node.last_review:
+        # 比对最后复习日期与今日日期
+        if center_node.last_review.date() == date.today():
+            is_reviewed_today = True
 
     return GraphContextDTO(
         center=NodeDTO(
@@ -160,6 +166,7 @@ def get_graph_context(request: ScanRequest, session: Session = Depends(get_sessi
             content=center_node.content,
             mastery_level=center_node.mastery_level,
             is_mission_target=(center_node.id in target_ids),
+            is_reviewed_today=is_reviewed_today,
             note=current_note,
             position=None
         ),
@@ -316,8 +323,13 @@ def handle_link_action(req: LinkRequest, session: Session = Depends(get_session)
             return LinkResultDTO(status="deleted", narrative="连接已断开。", xp_gained=0, total_xp=user.current_xp, level=user.level)
         return LinkResultDTO(status="deleted", narrative="无连接。", xp_gained=0, total_xp=user.current_xp, level=user.level)
 
-    if existing:
-        return LinkResultDTO(status="exists", narrative=existing.narrative, xp_gained=0, total_xp=user.current_xp, level=user.level)
+    if existing and not existing.narrative:
+        print(f"[Fix] Generating missing narrative for {req.source_id} <-> {req.target_id}")
+        rag_context = BrainService.retrieve_rag_context(f"{req.source_id} {req.target_id}")
+        existing.narrative = BrainService.generate_narrative(req.source_id, req.target_id, req.type, rag_context)
+        session.add(existing)
+        session.commit()
+        return LinkResultDTO(status="updated", narrative=existing.narrative, xp_gained=0, total_xp=user.current_xp, level=user.level, leveled_up=False)
     
     search_query = f"{req.source_id} {req.target_id}"
     rag_context = BrainService.retrieve_rag_context(search_query)

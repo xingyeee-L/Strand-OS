@@ -58,6 +58,7 @@ class NodeDTO(BaseModel):
     content: str
     mastery_level: int
     is_mission_target: bool = False # 🔥 Python 是 bool
+    is_reviewed_today: bool = False 
     note: str | None = None 
     position: List[float] | None = None 
 

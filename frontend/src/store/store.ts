@@ -7,11 +7,13 @@ export interface GalaxyNode {
   content: string;
   mastery_level: number;
   is_mission_target: boolean;
+  is_reviewed_today:boolean;
   position: [number, number, number]; 
   relation?: string;
   is_linked?: boolean;
   narrative?: string;
   note?: string;
+  hasUnseenLog?: boolean;
 }
 
 interface UserProfile {
@@ -70,6 +72,7 @@ interface GameState {
   setHoveredNodeId: (id: string | null) => void;
   completeMission: (word: string) => Promise<void>;
   cancelMission: (missionId: number) => Promise<void>;
+  showNarrative: (targetId: string) => void; 
 }
 
 const ORBIT_RADIUS = 18; 
@@ -269,10 +272,12 @@ completeMission: async (word: string) => {
     await get().jumpTo(word);
   },
 
+   // 🔥 [Action] 建立/修改物理链路
   establishLink: async (targetId: string, type: string, action = 'toggle') => {
     const { centerNode, neighbors } = get();
     if (!centerNode) return;
 
+    // 只有在创建和重生成时显示 Linking 动画
     set({ isLinking: true });
 
     try {
@@ -287,21 +292,17 @@ completeMission: async (word: string) => {
       
       const newNeighbors = neighbors.map(n => {
           if (n.id === targetId) {
-              let isLinked = n.is_linked;
-              let currentNarrative = n.narrative;
-
-              if (status === 'created' || status === 'updated') {
-                  isLinked = true;
-                  currentNarrative = narrative;
-              } else if (status === 'deleted') {
-                  isLinked = false;
-                  currentNarrative = undefined;
-              }
+              const isNewlyCreated = status === 'created';
+              const isUpdated = status === 'updated';
+              const isDeleted = status === 'deleted';
 
               return { 
                   ...n, 
-                  is_linked: isLinked, 
-                  narrative: currentNarrative 
+                  is_linked: isNewlyCreated || isUpdated || (status === 'exists'), 
+                  narrative: isDeleted ? undefined : narrative,
+                  // 🔥 [核心逻辑] 如果是后台重生成或者是新创建，标记为“有未读情报”
+                  // 如果是删除，则清除标记
+                  hasUnseenLog: isDeleted ? false : (isNewlyCreated || isUpdated)
               };
           }
           return n;
@@ -309,14 +310,59 @@ completeMission: async (word: string) => {
 
       set({ 
         neighbors: newNeighbors,
-        lastNarrative: status === 'deleted' ? null : narrative,
+        // 如果是创建新连接，我们允许它直接弹出来（爽感反馈）
+        // 如果是重生成，保持静默，不修改 lastNarrative
+        lastNarrative: status === 'created' ? narrative : get().lastNarrative,
         user: { ...get().user, current_xp: total_xp, level }
       });
+
+      // 如果直接弹出了剧情，取消掉那个未读标记
+      if (status === 'created') {
+          set((state) => ({
+              neighbors: state.neighbors.map(n => n.id === targetId ? { ...n, hasUnseenLog: false } : n)
+          }));
+      }
       
     } catch (e) { 
-      console.error(e); 
+      console.error("[Store] Link protocol failed:", e); 
     } finally {
       set({ isLinking: false });
+    }
+  },
+
+  // 🔥 [新增 Action] 战术指令：点击展示情报
+  // 🔥 修复点 1：必须加上 async 关键字
+  showNarrative: async (targetId: string) => {
+    // 🔥 修复点 2：从 get() 中解构需要的 Action 和数据
+    const { neighbors, establishLink } = get();
+    
+    const targetNode = neighbors.find(n => n.id === targetId);
+    
+    if (targetNode) {
+        // 如果已连接但没剧情，强制补全
+        if (targetNode.is_linked && !targetNode.narrative) {
+            console.log("[Store] Narrative missing. Re-linking...");
+            // 🔥 修复点 3：这里现在可以安全地使用 await 和解构出来的 establishLink
+            await establishLink(targetId, targetNode.relation || 'auto', 'toggle');
+            return;
+        }
+
+        // 状态闪断逻辑，触发打字机重置
+        if (targetNode.narrative) {
+            set({ lastNarrative: null });
+            
+            // 延迟 10ms 重新赋值，确保 React 触发渲染更新
+            setTimeout(() => {
+                set({ lastNarrative: targetNode.narrative });
+            }, 10);
+            
+            // 清除“未读”红点标记
+            set((state) => ({
+                neighbors: state.neighbors.map(n => 
+                    n.id === targetId ? { ...n, hasUnseenLog: false } : n
+                )
+            }));
+        }
     }
   },
   // ... 在 useGameStore 的实现中 ...

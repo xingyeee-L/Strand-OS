@@ -1,10 +1,11 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import axios from 'axios';
 import { useGameStore } from '../../store/store';
 import { useTypewriter } from '../../hooks/useTypewriter';
 import { audioService } from '../../utils/AudioService';
 import AIAvatar from './AIAvatar'; 
 
+// --- 战术语料库：中文版 ---
 const IDLE_MESSAGES = [
   "正在监测手性网络密度，连接状态稳定。",
   "奥德拉德克扫描仪已校准，未发现异常干扰。",
@@ -20,6 +21,7 @@ interface Candidate {
   word: string; lang: string; definition: string; source: 'MEMORY' | 'CLOUD';
 }
 
+// 辅助组件：干扰效果文本 (解密动画)
 const GlitchText = ({ text }: { text: string }) => (
   <div className="relative inline-block text-orange-500/50 mix-blend-screen overflow-hidden font-mono">
     <span className="animate-pulse blur-[1px] opacity-70 select-none">
@@ -30,9 +32,10 @@ const GlitchText = ({ text }: { text: string }) => (
 );
 
 export default function DialogueBar() {
+  // --- 1. 指挥中心数据解构 ---
   const { 
-    centerNode, neighbors, isScanning, isLinking, establishLink, lastNarrative, performDeepScan,
-    jumpTo, missions, completeMission 
+    centerNode, neighbors, isScanning, isLinking, establishLink, 
+    lastNarrative, performDeepScan, showNarrative, jumpTo, completeMission 
   } = useGameStore();
 
   const [input, setInput] = useState("");
@@ -44,6 +47,12 @@ export default function DialogueBar() {
   
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // --- 2. 状态判定：同步协议逻辑 ---
+  const isMissionTarget = centerNode?.is_mission_target;
+  const isReviewedToday = centerNode?.is_reviewed_today;
+  const canSync = !isReviewedToday; // 逻辑：今日未同步则允许操作
+
+  // --- 3. 逻辑引擎：动态待机消息 ---
   useEffect(() => {
     if (!lastNarrative && !isLinking && !isScanning) {
       const interval = setInterval(() => {
@@ -53,18 +62,21 @@ export default function DialogueBar() {
     }
   }, [lastNarrative, isLinking, isScanning]);
 
+  // --- 4. 逻辑引擎：语音播报 ---
   useEffect(() => {
     if (lastNarrative) {
       audioService.speak(lastNarrative);
     }
   }, [lastNarrative]);
 
+  // --- 5. 交互音效处理 ---
   const handleInteraction = (type: 'click' | 'hover') => {
     audioService.init(); 
     if (type === 'click') audioService.playSFX('click');
     else audioService.playSFX('hover', 0.1); 
   };
 
+  // --- 6. 搜索联想逻辑 (Debounce) ---
   useEffect(() => {
     if (input.trim().length < 2) { setCandidates([]); setShowDropdown(false); return; }
     setIsSearching(true);
@@ -74,7 +86,11 @@ export default function DialogueBar() {
         setCandidates(res.data);
         setShowDropdown(true);
         setSelectedIndex(0); 
-      } catch (e) { console.error(e); } finally { setIsSearching(false); }
+      } catch (e) {
+        console.error("Radar Offline:", e);
+      } finally {
+        setIsSearching(false);
+      }
     }, 300);
     return () => clearTimeout(timer);
   }, [input]);
@@ -86,6 +102,7 @@ export default function DialogueBar() {
     await jumpTo(candidate.word, undefined, candidate.definition);
   };
 
+  // --- 7. 键盘操作逻辑 ---
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (!showDropdown || candidates.length === 0) return;
     if (e.key === 'ArrowUp') {
@@ -105,27 +122,41 @@ export default function DialogueBar() {
     }
   };
 
+  // --- 8. 文本渲染准备 (带 Key 闪断修复) ---
   const narrativeText = isLinking ? "正在解析信号频率..." : (lastNarrative || idleText);
+  const typewriterKey = useMemo(() => lastNarrative ? lastNarrative.slice(0, 10) + Date.now() : 'idle', [lastNarrative]);
   const displayNarrative = useTypewriter(narrativeText, 25);
-  const isMissionTarget = centerNode?.is_mission_target;
 
+  // --- 9. 子渲染：本地网络项 ---
   const renderOptionItem = (node: any, index: number) => {
     const isConnected = node.is_linked;
+    const hasNewInfo = node.hasUnseenLog;
     return (
       <div key={node.id} className="flex items-center gap-2 mb-1 group">
         <button
           onMouseEnter={() => handleInteraction('hover')}
           onClick={() => {
             handleInteraction('click');
-            if (isConnected) useGameStore.setState({ lastNarrative: node.narrative });
-            else establishLink(node.id, node.relation || 'auto', 'toggle');
+            if (isConnected) {
+                showNarrative(node.id); 
+            } else {
+                establishLink(node.id, node.relation || 'auto', 'toggle');
+            }
           }}
-          className={`flex-1 text-left px-3 py-2 text-xs font-mono border-l-2 transition-all flex justify-between items-center ${isConnected ? 'border-orange-500 text-orange-200 bg-orange-900/10' : 'border-cyan-500 text-cyan-200 hover:bg-white/10'}`}
+          className={`flex-1 text-left px-3 py-2 text-xs font-mono border-l-2 transition-all flex justify-between items-center 
+            ${hasNewInfo 
+                ? 'border-orange-500 text-orange-400 animate-pulse bg-orange-500/10' 
+                : isConnected 
+                    ? 'border-orange-500 text-orange-200 bg-orange-900/10' 
+                    : 'border-cyan-500 text-cyan-200 hover:bg-white/10'}`}
         >
           <div className="flex items-center">
              <span className="mr-2 opacity-50 font-bold">[{index + 1}]</span>
-             <span className="truncate max-w-[120px] font-bold uppercase">{node.id}</span>
+             <span className={`truncate max-w-[120px] font-bold uppercase ${hasNewInfo ? 'text-white' : ''}`}>
+                 {node.id}
+             </span>
           </div>
+          {hasNewInfo && <span className="w-1.5 h-1.5 bg-orange-500 rounded-full"></span>}
         </button>
       </div>
     );
@@ -134,46 +165,53 @@ export default function DialogueBar() {
   if (!centerNode) return null;
 
   return (
-     <div className={`fixed bottom-0 left-0 w-full h-48 z-50 flex bg-gray-950/95 backdrop-blur-xl border-t-2 ${isLinking ? 'border-orange-500 animate-pulse' : 'border-cyan-500/50'} text-white font-rpg shadow-[0_-10px_50px_rgba(0,0,0,0.8)] pointer-events-auto`}>
+     <div className={`fixed bottom-0 left-0 w-full h-48 z-50 flex bg-gray-950/95 backdrop-blur-xl border-t-2 ${isLinking ? 'border-orange-500 animate-pulse' : 'border-cyan-500/50'} text-white font-rpg shadow-[0_-10px_50px_rgba(0,0,0,0.8)] pointer-events-auto transition-all duration-500`}>
       
-      <div className="w-40 h-full border-r border-white/10 flex flex-col items-center justify-center bg-black">
+      {/* 1. 左侧区域：AI 头像与状态条 */}
+      <div className="w-40 h-full border-r border-white/10 flex flex-col items-center justify-center bg-black/40">
         <AIAvatar state={isLinking || isSearching ? 'processing' : 'idle'} />
         <div className="w-full h-1 mt-auto bg-gray-900 flex">
            <div className={`h-full transition-all duration-300 ${isLinking ? 'w-full bg-orange-500 animate-pulse' : 'w-1/3 bg-cyan-500'}`}></div>
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col relative px-6 py-4">
-        <div className="flex-1 overflow-y-auto scrollbar-none mb-2 relative">
-            <div className="flex items-center gap-2 mb-1 sticky top-0 bg-gray-950/0 w-full z-10">
-                <span className={`w-1.5 h-1.5 rounded-full ${isLinking ? 'bg-orange-500 animate-ping' : 'bg-orange-600'}`}></span>
-                <span className="text-[10px] text-orange-500 font-bold tracking-wider uppercase opacity-80">SC-7274 实时链路日志</span>
+      {/* 2. 中间区域：系统日志与指令输入 */}
+      <div className="flex-1 flex flex-col relative px-8 py-6">
+        {/* 系统日志显示区 */}
+        <div className="flex-1 overflow-y-auto scrollbar-none mb-4 relative">
+            <div className="flex items-center gap-2 mb-2 sticky top-0 bg-gray-950/0 w-full z-10">
+                <span className={`w-2 h-2 rounded-full ${isLinking ? 'bg-orange-500 animate-ping' : 'bg-orange-600 shadow-[0_0_8px_orange]'}`}></span>
+                <span className="text-[11px] text-orange-500 font-bold tracking-[0.2em] uppercase opacity-90">SC-7274 Tactical Log</span>
             </div>
-            <div className="text-sm leading-relaxed text-orange-100/90 font-serif">
+            <div key={typewriterKey} className="text-base leading-relaxed text-orange-100/90 font-serif max-w-[95%]">
                 {isLinking ? <GlitchText text="DECRYPTING_SIGNAL_STREAM..." /> : displayNarrative}
             </div>
         </div>
 
-        <div className="relative w-full h-10 group">
+        {/* 交互输入框容器 */}
+        <div className="relative w-full h-12 group">
             {showDropdown && candidates.length > 0 && (
-                <div className="absolute bottom-full left-0 w-full mb-2 bg-black/95 border border-cyan-500/30 rounded-t shadow-2xl overflow-hidden z-50">
-                    <ul className="max-h-60 overflow-y-auto scrollbar-thin scrollbar-thumb-cyan-900">
+                <div className="absolute bottom-full left-0 w-full mb-2 bg-black/95 border border-cyan-500/30 rounded-t shadow-[0_-15px_40px_rgba(0,0,0,0.9)] overflow-hidden z-50">
+                    <ul className="max-h-64 overflow-y-auto scrollbar-thin scrollbar-thumb-cyan-900">
                         {candidates.map((item, idx) => (
                             <li key={idx}>
                                 <button
                                     onMouseEnter={() => handleInteraction('hover')}
                                     onClick={() => executeCommand(item)}
-                                    className={`w-full text-left px-4 py-2 text-xs flex justify-between items-center border-l-2 ${idx === selectedIndex ? 'bg-white/10 border-cyan-400 text-white' : 'border-transparent text-gray-400'}`}
+                                    className={`w-full text-left px-5 py-3 text-xs flex justify-between items-center border-l-2 ${idx === selectedIndex ? 'bg-white/10 border-cyan-400 text-white' : 'border-transparent text-gray-400 hover:bg-white/5'}`}
                                 >
-                                    <span className="font-bold uppercase tracking-wider">{item.word}</span>
-                                    <span className={`text-[9px] px-1.5 py-0.5 rounded border font-bold ${item.lang === 'DE' ? 'border-yellow-700 text-yellow-500' : 'border-blue-700 text-blue-500'}`}>{item.lang}</span>
+                                    <span className="font-bold uppercase tracking-wider text-sm">{item.word}</span>
+                                    <span className={`text-[10px] px-2 py-0.5 rounded border font-bold ${item.lang === 'DE' ? 'border-yellow-700 text-yellow-500' : 'border-blue-700 text-blue-500'}`}>{item.lang}</span>
                                 </button>
                             </li>
                         ))}
                     </ul>
                 </div>
             )}
-            <div className="absolute inset-0 bg-cyan-900/10 border border-cyan-500/30 rounded flex items-center px-3 shadow-[0_0_15px_rgba(0,255,255,0.05)]">
+            <div className="absolute inset-0 bg-cyan-950/20 border border-cyan-500/30 rounded-lg flex items-center px-4 shadow-[0_0_20px_rgba(0,255,255,0.05)] group-focus-within:border-cyan-400 transition-colors">
+                <span className={`mr-4 font-mono text-xl select-none ${isSearching ? 'text-orange-500 animate-spin' : 'text-cyan-500 animate-pulse'}`}>
+                    {isSearching ? '⟳' : '>_'}
+                </span>
                 <input
                     ref={inputRef}
                     type="text"
@@ -181,45 +219,107 @@ export default function DialogueBar() {
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
                     onFocus={() => audioService.init()}
-                    placeholder="输入指令或坐标..."
-                    className="w-full bg-transparent border-none outline-none text-cyan-100 placeholder-cyan-800 font-mono text-sm h-full tracking-widest uppercase"
+                    placeholder="ENTER COMMAND / SCAN COORDINATES..."
+                    className="w-full bg-transparent border-none outline-none text-cyan-100 placeholder-cyan-900 font-mono text-base h-full tracking-[0.1em] uppercase"
                     autoComplete="off"
                 />
             </div>
         </div>
       </div>
 
-      <div className="w-72 md:w-80 bg-black/40 border-l border-white/10 p-4 flex flex-col overflow-y-auto scrollbar-thin scrollbar-thumb-gray-800 relative">
-        <div className="text-[9px] uppercase text-gray-600 mb-3 tracking-[0.2em] font-bold flex justify-between">
-            <span>本地网络</span>
-            <span>{neighbors.length} 目标已锁定</span>
+      {/* 3. 右侧区域：本地网络列表与战术控制 (高度优化版) */}
+      <div className="w-64 md:w-72 bg-black/60 border-l border-white/10 p-3 flex flex-col overflow-hidden relative shadow-[-10px_0_30px_rgba(0,0,0,0.5)]">
+        
+        {/* 头部：紧凑排列 */}
+        <div className="flex justify-between items-center mb-2 px-1 border-b border-white/5 pb-1">
+            <span className="text-[9px] uppercase text-cyan-700 font-mono font-black tracking-widest">Local_Net</span>
+            <span className="text-[10px] text-gray-600 font-mono">{neighbors.length} OBJ</span>
         </div>
         
-        <div className="flex-1 min-h-0 overflow-y-auto">
-            {neighbors.slice(0, 10).map((node, index) => renderOptionItem(node, index))}
-            {neighbors.length === 0 && !isMissionTarget && (
-                 <div className="text-gray-700 text-[10px] italic text-center py-4 uppercase">未检测到有效关联信号</div>
+        {/* 邻居滚动列表：使用 flex-1 撑满剩余高度 */}
+        <div className="flex-1 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-cyan-900/30">
+            {neighbors.length === 0 && (
+                 <div className="text-gray-800 text-[9px] italic text-center py-4 font-mono uppercase tracking-widest">No Signals</div>
             )}
+            
+            {neighbors.map((node, index) => {
+                const isConnected = node.is_linked;
+                const hasNewInfo = node.hasUnseenLog;
+                return (
+                    <div key={node.id} className="mb-0.5 group">
+                        <button
+                            onMouseEnter={() => handleInteraction('hover')}
+                            onClick={() => {
+                                handleInteraction('click');
+                                if (isConnected) showNarrative(node.id);
+                                else establishLink(node.id, node.relation || 'auto', 'toggle');
+                            }}
+                            className={`w-full text-left px-2 py-1.5 text-[11px] font-mono border-l-2 transition-all flex justify-between items-center
+                                ${hasNewInfo 
+                                    ? 'border-orange-500 text-orange-400 animate-pulse bg-orange-500/5' 
+                                    : isConnected 
+                                        ? 'border-orange-500/40 text-orange-200/70 bg-orange-950/5 hover:bg-orange-900/10 hover:text-orange-200' 
+                                        : 'border-cyan-900/30 text-cyan-600 hover:border-cyan-500 hover:bg-cyan-500/5 hover:text-cyan-100'}`}
+                        >
+                            <div className="flex items-center gap-2 overflow-hidden">
+                                <span className="opacity-30 text-[9px] font-bold">{(index + 1).toString().padStart(2, '0')}</span>
+                                <span className="truncate font-bold uppercase tracking-tighter">{node.id}</span>
+                            </div>
+                            
+                            {/* 仅在未连接或有新消息时显示标记，减少视觉噪音 */}
+                            <div className="flex items-center gap-1.5 ml-2">
+                                {node.relation && !isConnected && (
+                                    <span className="text-[7px] opacity-40 uppercase border border-current px-0.5 rounded-sm scale-90 origin-right">
+                                        {node.relation.slice(0, 4)}
+                                    </span>
+                                )}
+                                {hasNewInfo && <span className="w-1 h-1 bg-orange-500 rounded-full shadow-[0_0_5px_orange]"></span>}
+                            </div>
+                        </button>
+                    </div>
+                );
+            })}
         </div>
         
+        {/* 战术操作区：紧凑型底部 */}
         {!isScanning && (
-           <div className="flex flex-col items-center gap-2 mt-4 border-t border-white/5 pt-4">
-             {isMissionTarget && (
-                 <button 
-                    onClick={() => { audioService.playSFX('sucess'); completeMission(centerNode.id); }} 
-                    className="w-full py-2 bg-orange-500/20 border border-orange-500 text-orange-500 text-[10px] font-bold uppercase mb-1 hover:bg-orange-500 hover:text-black transition-all"
-                 > 
-                    [ 确认掌握此目标 ] 
-                 </button>
+           <div className="mt-2 pt-2 border-t border-white/10 bg-black/40">
+             <div className="flex gap-1.5">
+                <button 
+                    disabled={!canSync} 
+                    onClick={() => { 
+                        handleInteraction('click');
+                        audioService.playSFX('sucess'); 
+                        completeMission(centerNode.id); 
+                    }} 
+                    className={`flex-1 py-1.5 border font-black text-[9px] uppercase transition-all tracking-tighter rounded-sm
+                        ${canSync 
+                        ? 'bg-orange-500/20 border-orange-500 text-orange-500 hover:bg-orange-500 hover:text-black' 
+                        : 'bg-gray-800/10 border-gray-800 text-gray-700 cursor-not-allowed opacity-30'}`}
+                > 
+                    {canSync ? "神经同步" : "已同步"} 
+                </button>
+                
+                <button 
+                    onMouseEnter={() => handleInteraction('hover')}
+                    onClick={() => { 
+                        handleInteraction('click'); 
+                        audioService.playSFX('scan'); 
+                        performDeepScan(); 
+                    }} 
+                    className="flex-1 group relative py-1.5 bg-cyan-950/40 border border-cyan-500/40 text-cyan-400 text-[9px] font-black uppercase overflow-hidden tracking-tighter rounded-sm"
+                > 
+                    <div className="absolute inset-0 bg-cyan-400/5 translate-x-[-100%] group-hover:animate-[scan_1s_linear_infinite]"></div>
+                    <span className="relative">{neighbors.length === 0 ? "SCAN" : "RE-SCAN"}</span>
+                </button>
+             </div>
+             
+             {/* 优先级提示：占用极小空间 */}
+             {isMissionTarget && canSync && (
+                <div className="text-[7px] text-orange-600 font-mono text-center mt-1 animate-pulse font-bold tracking-tighter">
+                    [!] TARGET_SYNC_REQUIRED
+                </div>
              )}
-             <button 
-                onMouseEnter={() => handleInteraction('hover')}
-                onClick={() => { audioService.playSFX('scan'); performDeepScan(); }} 
-                className="group relative w-full py-2 bg-cyan-950/30 border border-cyan-500/30 text-cyan-400 text-[10px] font-bold uppercase overflow-hidden"
-             > 
-                <div className="absolute inset-0 bg-cyan-400/5 translate-x-[-100%] group-hover:animate-[scan_1s_linear_infinite]"></div>
-                {neighbors.length === 0 ? "启动奥德拉德克深描" : "重新扫描当前区域"} 
-             </button>
            </div>
         )}
       </div>
