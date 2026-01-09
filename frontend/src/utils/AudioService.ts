@@ -36,7 +36,7 @@ class AudioService {
     }
 
     // 🔥 战术调音：降低音调(Pitch)，略微加快速度(Rate)，制造冷静、略带压抑的 AI 感
-    utterance.rate = 1.25;  // 略快，表现专业性
+    utterance.rate = 1.15;  // 略快，表现专业性
     utterance.pitch = 0.75; // 低沉，更有磁性
     utterance.volume = 0.8;
 
