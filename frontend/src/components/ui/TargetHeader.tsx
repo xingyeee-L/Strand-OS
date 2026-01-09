@@ -61,7 +61,7 @@ export default function TargetHeader() {
               <div className="w-1/3 h-1 bg-cyan-500 mb-2 shadow-[0_0_10px_rgba(0,255,255,0.5)]"></div>
 
               {/* Title */}
-              <div className="text-4xl font-black text-white tracking-[0.2em] uppercase font-mono drop-shadow-md">
+              <div className="text-4xl font-black text-white tracking-[0.2em] font-mono drop-shadow-md">
                   {title}
               </div>
 

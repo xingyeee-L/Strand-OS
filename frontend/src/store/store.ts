@@ -139,23 +139,26 @@ completeMission: async (word: string) => {
         const res = await axios.post('http://127.0.0.1:8000/mission/complete_word', { word });
         
         if (res.data.status === 'reviewed') {
-            // 1. 刷新任务列表 (为了右上角的 MissionBoard)
+            // 1. 刷新任务列表
             await get().fetchMissions();
             
-            // 2. 🔥 [关键修复]：更新 centerNode 状态，让按钮消失
+            // 2. 🔥 [核心修复] 同步更新中心节点状态
             const { centerNode } = get();
             if (centerNode && centerNode.id === word) {
                 set({ 
                     centerNode: { 
                         ...centerNode, 
-                        is_mission_target: false // 强制关闭标记
+                        is_mission_target: false,
+                        is_reviewed_today: true // 🔥 强制设为已同步，按钮会立即变灰
                     } 
                 });
             }
             
-            // 3. 刷新 User XP
+            // 3. 刷新 User XP (XP 涨了)
             const userRes = await axios.get('http://127.0.0.1:8000/user/profile');
             set({ user: userRes.data });
+
+            console.log(`[SC-7274] ${word} 神经链路已稳固。`);
         }
     } catch (e) {
         console.error("Mission completion failed", e);
@@ -163,7 +166,7 @@ completeMission: async (word: string) => {
   },
   initWorld: async () => {
     // 1. 初始化位置
-    await get().jumpTo("fernweh", [0, 0, 0]);
+    await get().jumpTo("Strand", [0, 0, 0]);
     
     // 2. 🔥 [新增] 触发每日任务生成 (后端会自己判断今天是否已生成)
     try {

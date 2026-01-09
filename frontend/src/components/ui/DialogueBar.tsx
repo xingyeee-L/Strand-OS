@@ -190,24 +190,45 @@ export default function DialogueBar() {
 
         {/* 交互输入框容器 */}
         <div className="relative w-full h-12 group">
-            {showDropdown && candidates.length > 0 && (
-                <div className="absolute bottom-full left-0 w-full mb-2 bg-black/95 border border-cyan-500/30 rounded-t shadow-[0_-15px_40px_rgba(0,0,0,0.9)] overflow-hidden z-50">
-                    <ul className="max-h-64 overflow-y-auto scrollbar-thin scrollbar-thumb-cyan-900">
-                        {candidates.map((item, idx) => (
-                            <li key={idx}>
-                                <button
-                                    onMouseEnter={() => handleInteraction('hover')}
-                                    onClick={() => executeCommand(item)}
-                                    className={`w-full text-left px-5 py-3 text-xs flex justify-between items-center border-l-2 ${idx === selectedIndex ? 'bg-white/10 border-cyan-400 text-white' : 'border-transparent text-gray-400 hover:bg-white/5'}`}
-                                >
-                                    <span className="font-bold uppercase tracking-wider text-sm">{item.word}</span>
-                                    <span className={`text-[10px] px-2 py-0.5 rounded border font-bold ${item.lang === 'DE' ? 'border-yellow-700 text-yellow-500' : 'border-blue-700 text-blue-500'}`}>{item.lang}</span>
-                                </button>
-                            </li>
-                        ))}
-                    </ul>
-                </div>
-            )}
+
+{showDropdown && candidates.length > 0 && (
+    <div className="absolute bottom-full left-0 w-full mb-2 bg-black/95 border border-cyan-500/30 rounded-t shadow-[0_-15px_40px_rgba(0,0,0,0.9)] overflow-hidden z-50">
+        <div className="flex justify-between items-center px-3 py-1 bg-cyan-950/50 border-b border-cyan-500/20">
+            <span className="text-[9px] text-cyan-400 tracking-widest uppercase">Detected Signals</span>
+            <span className="text-[9px] text-cyan-600 uppercase">{candidates.length} Matches</span>
+        </div>
+        <ul className="max-h-64 overflow-y-auto scrollbar-thin scrollbar-thumb-cyan-900">
+            {candidates.map((item, idx) => (
+                <li key={idx}>
+                    <button
+                        onMouseEnter={() => handleInteraction('hover')}
+                        onClick={() => executeCommand(item)}
+                        className={`w-full text-left px-5 py-3 text-xs flex justify-between items-center border-l-2 transition-all
+                            ${idx === selectedIndex ? 'bg-cyan-500/10 border-cyan-400 text-white' : 'border-transparent text-gray-400 hover:bg-white/5'}`}
+                    >
+                        {/* 🔥 核心修复：单词与释义纵向排列 */}
+                        <div className="flex flex-col gap-0.5 overflow-hidden pr-4">
+                            <span className={`font-bold uppercase tracking-wider text-sm ${idx === selectedIndex ? 'text-cyan-300' : 'text-gray-200'}`}>
+                                {item.word}
+                            </span>
+                            {/* 释义预览 */}
+                            <span className="text-[10px] opacity-50 font-serif italic truncate max-w-[280px]">
+                                {item.definition || "Analyzing pattern..."}
+                            </span>
+                        </div>
+
+                        {/* 语言标签 */}
+                        <div className="flex-shrink-0 flex items-center gap-2">
+                            <span className={`text-[8px] px-1.5 py-0.5 rounded border font-bold ${item.lang === 'DE' ? 'border-yellow-700 text-yellow-500' : 'border-cyan-700 text-cyan-500'}`}>
+                                {item.lang}
+                            </span>
+                        </div>
+                    </button>
+                </li>
+            ))}
+        </ul>
+    </div>
+)}
             <div className="absolute inset-0 bg-cyan-950/20 border border-cyan-500/30 rounded-lg flex items-center px-4 shadow-[0_0_20px_rgba(0,255,255,0.05)] group-focus-within:border-cyan-400 transition-colors">
                 <span className={`mr-4 font-mono text-xl select-none ${isSearching ? 'text-orange-500 animate-spin' : 'text-cyan-500 animate-pulse'}`}>
                     {isSearching ? '⟳' : '>_'}
@@ -281,10 +302,11 @@ export default function DialogueBar() {
             })}
         </div>
         
-        {/* 战术操作区：紧凑型底部 */}
+        {/* 战术操作区：按钮颜色深度优化版 */}
         {!isScanning && (
            <div className="mt-2 pt-2 border-t border-white/10 bg-black/40">
              <div className="flex gap-1.5">
+                {/* 1. 同步/稳定按钮 */}
                 <button 
                     disabled={!canSync} 
                     onClick={() => { 
@@ -294,12 +316,17 @@ export default function DialogueBar() {
                     }} 
                     className={`flex-1 py-1.5 border font-black text-[9px] uppercase transition-all tracking-tighter rounded-sm
                         ${canSync 
-                        ? 'bg-orange-500/20 border-orange-500 text-orange-500 hover:bg-orange-500 hover:text-black' 
-                        : 'bg-gray-800/10 border-gray-800 text-gray-700 cursor-not-allowed opacity-30'}`}
+                        ? 'bg-orange-500/20 border-orange-500 text-orange-500 hover:bg-orange-500 hover:text-black shadow-[0_0_15px_rgba(249,115,22,0.3)]' 
+                        // 🔥 [核心优化]：弃用灰色，改用深邃的“静默青”
+                        : 'bg-cyan-950/30 border-cyan-900/50 text-cyan-800 cursor-not-allowed opacity-80'}`}
                 > 
-                    {canSync ? "神经同步" : "已同步"} 
+                    <div className="flex items-center justify-center gap-1">
+                        {!canSync && <span className="w-1 h-1 bg-cyan-800 rounded-full"></span>}
+                        {canSync ? "SYNC_LINK" : "LINK_STABLE"} 
+                    </div>
                 </button>
                 
+                {/* 2. 扫描按钮：保持经典的青色高亮 */}
                 <button 
                     onMouseEnter={() => handleInteraction('hover')}
                     onClick={() => { 
@@ -314,7 +341,7 @@ export default function DialogueBar() {
                 </button>
              </div>
              
-             {/* 优先级提示：占用极小空间 */}
+             {/* 优先级提示 */}
              {isMissionTarget && canSync && (
                 <div className="text-[7px] text-orange-600 font-mono text-center mt-1 animate-pulse font-bold tracking-tighter">
                     [!] TARGET_SYNC_REQUIRED
