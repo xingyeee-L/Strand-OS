@@ -9,7 +9,8 @@ data/
 # 屏蔽 backend 下可能产生的 db
 backend/*.db
 backend/chroma_db/
-
+backend/build/
+abcnken/dist/
 # --- 3. 前端依赖与产物 (Frontend) ---
 frontend/node_modules/
 frontend/dist/
@@ -23,3 +24,5 @@ logs
 __pycache__/
 .vscode/
 node_modules
+backend/dist/
+release/

@@ -1,0 +1,38 @@
+{
+  "appId": "com.strand.os",
+  "productName": "StrandOS",
+  "directories": {
+    "output": "release"
+  },
+  "files": [
+    "frontend/dist/**/*",
+    "electron-main.js",
+    "package.json",
+    "node_modules/**/*"
+  ],
+  "extraResources": [
+    {
+      "from": "backend/dist/strand-brain",
+      "to": "strand-brain",
+      "filter": ["**/*"]
+    },
+    {
+      "from": "data",
+      "to": "data",
+      "filter": ["**/*"]
+    }
+  ],
+  "mac": {
+    "target": "zip",
+    "category": "public.app-category.education",
+    "icon": "icon.png",
+    "hardenedRuntime": true,
+    "gatekeeperAssess": false
+  },
+  "dmg": {
+    "contents": [
+      { "x": 130, "y": 220 },
+      { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+    ]
+  }
+}

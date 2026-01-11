@@ -20,8 +20,7 @@ export default function AIAvatar({ state }: AIAvatarProps) {
 
   // 颜色映射
   const colorClass = state === 'processing' ? 'text-orange-500' : 'text-cyan-400';
-  const shadowClass = state === 'processing' ? 'shadow-orange-500/50' : 'shadow-cyan-500/50';
-
+  
   return (
     <div className="relative w-full h-full flex items-center justify-center bg-black/80 overflow-hidden border border-white/5">
       
