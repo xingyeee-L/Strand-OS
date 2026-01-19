@@ -70,7 +70,7 @@ interface GameState {
   // 添加这一行
   deleteCurrentNode: () => Promise<void>;
   setHoveredNodeId: (id: string | null) => void;
-  completeMission: (word: string) => Promise<void>;
+  completeMission: (word: string, analysis?: string) => Promise<void>; 
   cancelMission: (missionId: number) => Promise<void>;
   showNarrative: (targetId: string) => void; 
 }
@@ -134,34 +134,44 @@ export const useGameStore = create<GameState>((set, get) => ({
         console.error("Extra mission failed", e);
     }
 },
-completeMission: async (word: string) => {
+completeMission: async (word: string, analysis?: string) => {
+    const { centerNode } = get();
+    if (!centerNode) return;
+
+    // 🔥 [关键修复 1]：激活刻录状态，触发 UI 显示“正在刻录...”
+    set({ isLinking: true });
+
     try {
-        const res = await axios.post('http://127.0.0.1:8000/mission/complete_word', { word });
+        const res = await axios.post('http://127.0.0.1:8000/mission/complete_word', { 
+            word_id: word, 
+            analysis: analysis || "" 
+        });
         
         if (res.data.status === 'reviewed') {
+            const ai_analysis = res.data.analysis; // 获取 AI 生成的分析
+
             // 1. 刷新任务列表
             await get().fetchMissions();
             
-            // 2. 🔥 [核心修复] 同步更新中心节点状态
-            const { centerNode } = get();
-            if (centerNode && centerNode.id === word) {
-                set({ 
-                    centerNode: { 
-                        ...centerNode, 
-                        is_mission_target: false,
-                        is_reviewed_today: true // 🔥 强制设为已同步，按钮会立即变灰
-                    } 
-                });
-            }
+            // 2. 🔥 [关键修复 2]：将 AI 分析结果直接推送到对话框
+            set({ 
+                centerNode: { 
+                    ...centerNode, 
+                    is_reviewed_today: true,
+                    note: ai_analysis 
+                },
+                lastNarrative: ai_analysis // 确保结果呈现到屏幕
+            });
             
-            // 3. 刷新 User XP (XP 涨了)
+            // 3. 刷新用户状态
             const userRes = await axios.get('http://127.0.0.1:8000/user/profile');
             set({ user: userRes.data });
-
-            console.log(`[SC-7274] ${word} 神经链路已稳固。`);
         }
     } catch (e) {
-        console.error("Mission completion failed", e);
+        console.error("Mission completion failed:", e);
+    } finally {
+        // 🔥 [关键修复 3]：无论成功失败，结束刻录状态
+        set({ isLinking: false });
     }
   },
   initWorld: async () => {
@@ -185,17 +195,40 @@ completeMission: async (word: string) => {
     if (!word) return;
     set({ isScanning: true });
     
-    // A. 坐标计算
-    // 如果没有指定落点，默认在当前中心点侧前方生成
+     // A. 坐标计算逻辑升级
     let currentPos = targetPos;
     if (!currentPos) {
         const existingNode = get().neighbors.find(n => n.id === word);
-        // 如果是已存在的卫星，直接飞过去；否则新开辟坐标
-        currentPos = existingNode ? existingNode.position : [
-            (get().centerNode?.position[0] || 0) + 10, 
-            0, 
-            (get().centerNode?.position[2] || 0) + 10
-        ];
+        
+        if (existingNode) {
+            currentPos = existingNode.position;
+        } else {
+            // --- 🔥 [战术重构：环形折跃] ---
+            const JUMP_RADIUS = 40; // 每次跳跃的固定跨度
+            const MAP_BOUNDARY = 120; // 这里的边界必须小于 Terrain.tsx 里的 500
+            
+            const prevPos = get().centerNode?.position || [0, 0, 0];
+            
+            // 1. 生成随机角度 (0 ~ 360度)
+            const angle = Math.random() * Math.PI * 2;
+            
+            // 2. 计算候选新坐标
+            let nextX = prevPos[0] + JUMP_RADIUS * Math.cos(angle);
+            let nextZ = prevPos[2] + JUMP_RADIUS * Math.sin(angle);
+            
+            // 3. 边界引力检查 (Boundary Gravity Check)
+            // 如果新点离中心 (0,0,0) 太远，将其拉回原点附近的随机环带
+            const distFromOrigin = Math.sqrt(nextX ** 2 + nextZ ** 2);
+            if (distFromOrigin > MAP_BOUNDARY) {
+                console.log("⚠️ [SYSTEM] 接近手性边界，执行引力回航...");
+                // 强制将新坐标设定在离原点 30-50 米的随机环带内
+                const resetRadius = 30 + Math.random() * 20;
+                nextX = resetRadius * Math.cos(angle);
+                nextZ = resetRadius * Math.sin(angle);
+            }
+            
+            currentPos = [nextX, 0, nextZ];
+        }
     }
 
     try {

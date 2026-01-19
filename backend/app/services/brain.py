@@ -347,18 +347,31 @@ class BrainService:
     @staticmethod
     def fetch_smart_definition(word: str) -> str:
         """
-        [巡航版] 快速获取释义
-        🔥 绝对不调用 LLM，仅使用云端字典 API。如果 API 失败，返回占位符。
+        [极速补盲版] 查词引擎
+        1. 尝试有道全字段 (含 DE)
+        2. 若失败，开启 1s LLM 瞬时翻译
         """
-        hits = BrainService.fetch_dual_candidates(word)
-        if not hits: 
-            return "SIGNAL LOST: 暂无即时数据。请执行 ODRADEK 深度扫描。"
+        try:
+            url = f"http://dict.youdao.com/jsonapi?q={word}"
+            resp = requests.get(url, timeout=1.2)
+            if resp.status_code == 200:
+                data = resp.json()
+                # A. 德语优先
+                if "fc" in data and "word" in data["fc"]:
+                    return f"[DE] {data['fc']['word'][0]['trs'][0]['tr'][0]['l']['i'][0]}"
+                # B. 英语
+                if "ec" in data and "word" in data["ec"]:
+                    return data["ec"]["word"][0]["trs"][0]["tr"][0]["l"]["i"][0]
+        except: pass
         
-        # 优先返回德语（如果存在），否则返回第一个
-        for hit in hits:
-            if hit['lang'] == 'DE': return f"[DE] {hit['definition']}"
-        
-        return hits[0]['definition']
+        # 🔥 [新增] 1秒 LLM 补盲逻辑：只要求翻译，绝不废话
+        try:
+            prompt = f"Translate '{word}' to Chinese. Concise, max 10 chars. Mark [DE] if German."
+            # 使用 stop token 强制截断，防止 AI 话多
+            res = llm.invoke(prompt, stop=["\n"]).strip()
+            return res if res else "UNKNOWN SIGNAL"
+        except:
+            return "SIGNAL LOST: 暂无数据"
     # -------------------------------------------------------
     # 🧠 [SRS 引擎] 艾宾浩斯间隔算法 (简化版)
     # -------------------------------------------------------
@@ -395,3 +408,29 @@ class BrainService:
             res = llm.invoke(prompt, stop=["\n"]).strip()
             return res.split(":")[-1].strip()
         except: return f"Connection: {source} ↔ {target}."
+    @staticmethod
+    def generate_tactical_analysis(word: str, definition: str) -> str:
+        """
+        [高级指令] 为单词生成深度记忆锚点。
+        侧重：词根、联想、德英对比。
+        """
+        prompt = f"""
+        [Role] 你是 STRAND OS 首席语言学家 SC-7274。
+        [Task] 为单词 "{word}" 刻录战术记忆指纹。
+        [基本释义] {definition}
+        
+        [指令]
+        1. 分析该词的“记忆锚点”：如果是德语同源词请指出，如果是复杂词请拆解词根。
+        2. 语气：极简、冷峻、硬核。
+        3. 长度：严控在 40 字以内。
+        4. 格式示例：
+           - "来源：源自原始日耳曼语 *watar。与德语 Wasser 语义完全重合。"
+           - "构造：Prefix 'sub-' (下) + 'marine' (海)。直击：海面之下。"
+        
+        [输出] 直接输出结论，不要前缀。
+        """
+        try:
+            res = llm.invoke(prompt, stop=["\n"]).strip()
+            return res.replace('"', '')
+        except:
+            return f"数据刻录完成。目标：{word}。链路状态：稳定。"

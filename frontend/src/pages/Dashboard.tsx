@@ -29,16 +29,24 @@ export default function Dashboard() {
   }, [initWorld]);
 
   return (
-    <div className="w-full h-screen bg-black overflow-hidden relative selection:bg-cyan-500/30 font-mono">
-      
-      {/* 1. 3D World Layer (保持不变，含 Stars) */}
+    <div className="w-full h-screen bg-black overflow-hidden relative">
       <Canvas shadows camera={{ position: [0, 60, 100], fov: 55 }} gl={{ antialias: false }}>
-        <fog attach="fog" args={['#000', 40, 150]} />
-        <ambientLight intensity={0.1} />
-        <pointLight position={[10, 50, 10]} intensity={1} color="#00f2ff" />
-        <pointLight position={[-20, 50, -20]} intensity={0.5} color="#ffaa00" />
-        <Stars radius={200} depth={50} count={5000} factor={4} saturation={0} />
         
+        {/* 🔥 1. 调亮环境色：背景由纯黑改为深灰色，防止对比度过激 */}
+        <color attach="background" args={['#0a0a0c']} />
+
+        {/* 🔥 2. 深度重构雾效：从 [40, 150] 扩展到 [100, 600] 
+            这意味着 100米内完全清晰，600米外才彻底消失。 */}
+        <fog attach="fog" args={['#0a0a0c', 100, 600]} />
+
+        {/* 🔥 3. 增强环境光：从 0.1 提升到 0.5，让阴影处也能看清地形 */}
+        <ambientLight intensity={0.5} />
+
+        {/* 🔥 4. 增加顶置全局光：模拟天空的漫反射 */}
+        <pointLight position={[0, 200, 0]} intensity={1.5} color="#00f2ff" />
+        <pointLight position={[100, 100, 100]} intensity={1.0} color="#ffaa00" />
+        
+        <Stars radius={300} depth={60} count={8000} factor={7} saturation={0} />
         <Terrain />
         <NetworkLines onHoverLink={() => {}} />
         <CameraController />
