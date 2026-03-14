@@ -1,12 +1,13 @@
 import { useEffect } from 'react';
 import { useGameStore } from '../../store/store';
+import { t } from '../../i18n';
 
 interface Props {
   onClose: () => void;
 }
 
 export default function BookManager({ onClose }: Props) {
-  const { availableBooks, currentBook, bookProgress, fetchBooks, setBook } = useGameStore();
+  const { availableBooks, currentBook, bookProgress, fetchBooks, setBook, uiLang } = useGameStore();
 
   useEffect(() => {
     fetchBooks();
@@ -35,32 +36,32 @@ export default function BookManager({ onClose }: Props) {
             
             <div>
                 <div className="text-[10px] text-cyan-500 tracking-[0.2em] mb-3 uppercase opacity-70">
-                    Active Protocol
+                    {t(uiLang, 'book.activeProtocol')}
                 </div>
                 <div className="text-3xl font-black text-white break-words leading-tight tracking-wide">
-                    {currentBook || "NO DATA"}
+                    {currentBook || t(uiLang, 'book.noData')}
                 </div>
                 {currentBook && (
                    <div className="mt-2 text-[10px] text-green-500 font-mono flex items-center gap-2">
                      <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                     ONLINE
+                     {t(uiLang, 'book.online')}
                    </div>
                 )}
             </div>
             
             <div>
-                <div className="text-[10px] text-gray-500 mb-2 font-mono">PROGRESS INDEX</div>
+                <div className="text-[10px] text-gray-500 mb-2 font-mono">{t(uiLang, 'book.progressIndex')}</div>
                 <div className="text-5xl font-mono text-cyan-400 tracking-tighter">
                     {bookProgress}
                 </div>
-                <div className="text-[9px] text-gray-600 mt-1 uppercase">Words Ingested</div>
+                <div className="text-[9px] text-gray-600 mt-1 uppercase">{t(uiLang, 'book.wordsIngested')}</div>
             </div>
         </div>
 
         {/* 2. 右侧：书库列表 (Library List) */}
         <div className="flex-1 p-6 overflow-y-auto bg-black/20 scrollbar-thin scrollbar-thumb-gray-800">
             <div className="text-[10px] text-gray-500 tracking-[0.2em] mb-5 border-b border-white/5 pb-2">
-                AVAILABLE DATABASES
+                {t(uiLang, 'book.availableDatabases')}
             </div>
             
             <div className="flex flex-col gap-3">
@@ -83,7 +84,7 @@ export default function BookManager({ onClose }: Props) {
                     >
                         <div className="flex justify-between items-center z-10 relative">
                             <span className="font-bold tracking-wide text-sm">{book.name}</span>
-                            <span className="text-[10px] opacity-50">{book.total} ENTRIES</span>
+                            <span className="text-[10px] opacity-50">{book.total} {t(uiLang, 'book.entries')}</span>
                         </div>
 
                         {/* 进度条背景 */}

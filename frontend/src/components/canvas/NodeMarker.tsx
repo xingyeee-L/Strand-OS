@@ -1,18 +1,25 @@
 // @ts-nocheck
-import { useRef, useMemo, useState, useLayoutEffect } from 'react';
-import { useFrame, useThree } from '@react-three/fiber'; 
+import { memo, useRef, useMemo, useState, useLayoutEffect } from 'react';
+import { useFrame, useThree } from '@react-three/fiber';
 import { Text, Billboard, Float, Line, Html } from '@react-three/drei';
 import * as THREE from 'three';
-import { useGameStore } from '../../store/store';
+import { useGameStore, type GalaxyNode } from '../../store/store';
 import { getTerrainHeight, WATER_LEVEL } from '../../utils/terrain';
 
-export default function NodeMarker({ node, isActive, isRelated, onClick }) {
-  const innerMesh = useRef(null);
-  const outerMesh = useRef(null);
-  const { scene } = useThree(); 
-  
-  const { hoveredNodeId, setHoveredNodeId } = useGameStore();
-  const isHovered = hoveredNodeId === node.id;
+interface NodeMarkerProps {
+  node: GalaxyNode;
+  isActive: boolean;
+  isRelated: boolean;
+  onClick: () => void;
+}
+
+export default memo(function NodeMarker({ node, isActive, isRelated, onClick }: NodeMarkerProps) {
+  const innerMesh = useRef<THREE.Mesh>(null);
+  const outerMesh = useRef<THREE.Mesh>(null);
+  const { scene } = useThree();
+
+  const isHovered = useGameStore((state) => state.hoveredNodeId === node.id);
+  const setHoveredNodeId = useGameStore((state) => state.setHoveredNodeId);
 
   const [x, , z] = node.position || [0, 0, 0];
   const mathY = useMemo(() => getTerrainHeight(x, z), [x, z]);
@@ -28,9 +35,9 @@ export default function NodeMarker({ node, isActive, isRelated, onClick }) {
       const raycaster = new THREE.Raycaster();
       raycaster.set(new THREE.Vector3(x, 100, z), new THREE.Vector3(0, -1, 0));
       const hits = raycaster.intersectObject(terrainMesh);
-      if (hits.length > 0) setTerrainY(hits[0].point.y + 0.05); 
+      if (hits.length > 0) setTerrainY(hits[0].point.y + 0.05);
     }
-  }, [x, z, scene]); 
+  }, [x, z, scene]);
 
   // 动画
   useFrame((state, delta) => {
@@ -38,28 +45,28 @@ export default function NodeMarker({ node, isActive, isRelated, onClick }) {
     const waveY = isFloating ? Math.sin(state.clock.elapsedTime * 1.5 + x) * 0.2 : 0;
 
     if (innerMesh.current) {
-        innerMesh.current.rotation.y += delta * speed;
-        innerMesh.current.rotation.z += delta * (speed * 0.5);
-        innerMesh.current.position.y = waveY * 0.3; 
-        
-        if (isHovered) {
-             const pulse = (Math.sin(state.clock.elapsedTime * 10) + 1);
-             innerMesh.current.material.emissiveIntensity = 3 + pulse * 2;
-        } else {
-             innerMesh.current.material.emissiveIntensity = isActive ? 5.0 : (node.is_linked ? 3.0 : 1.5);
-        }
+      innerMesh.current.rotation.y += delta * speed;
+      innerMesh.current.rotation.z += delta * (speed * 0.5);
+      innerMesh.current.position.y = waveY * 0.3;
+
+      if (isHovered) {
+        const pulse = (Math.sin(state.clock.elapsedTime * 10) + 1);
+        innerMesh.current.material.emissiveIntensity = 3 + pulse * 2;
+      } else {
+        innerMesh.current.material.emissiveIntensity = isActive ? 5.0 : (node.is_linked ? 3.0 : 1.5);
+      }
     }
     if (outerMesh.current) {
-        outerMesh.current.rotation.y -= delta * (speed * 0.3);
-        outerMesh.current.rotation.x += delta * (speed * 0.2);
+      outerMesh.current.rotation.y -= delta * (speed * 0.3);
+      outerMesh.current.rotation.x += delta * (speed * 0.2);
     }
   });
 
   // 颜色
-  let color = "#00f2ff";       
-  let glowIntensity = 1.5;     
-  if (isActive) { color = "#ffaa00"; glowIntensity = 5.0; } 
-  else if (node.is_linked) { color = "#FFD700"; glowIntensity = 3.0; } 
+  let color = "#00f2ff";
+  let glowIntensity = 1.5;
+  if (isActive) { color = "#ffaa00"; glowIntensity = 5.0; }
+  else if (node.is_linked) { color = "#FFD700"; glowIntensity = 3.0; }
   else if (node.is_mission_target) { color = "#FFFF00"; glowIntensity = 2.0; }
 
   const textColor = (isActive || node.is_linked) ? color : (isRelated ? "#00e0ff" : "#888");
@@ -77,23 +84,23 @@ export default function NodeMarker({ node, isActive, isRelated, onClick }) {
 
   return (
     <group position={[x, 0, z]}>
-      
+
       {/* 🔥 [关键修改]：把事件监听器移到 Float 容器上，这样所有子元素（晶体+文字）都能触发 */}
-      <Float 
-        speed={2} 
-        rotationIntensity={0} 
-        floatIntensity={0.5} 
-        floatingRange={[-0.2, 0.2]} 
+      <Float
+        speed={2}
+        rotationIntensity={0}
+        floatIntensity={0.5}
+        floatingRange={[-0.2, 0.2]}
         position={[0, crystalY, 0]}
         onPointerOver={(e) => { e.stopPropagation(); setHoveredNodeId(node.id); }}
         onPointerOut={() => setHoveredNodeId(null)}
         onClick={(e) => { e.stopPropagation(); onClick(node.id); }} // 点击也统管了
       >
-        
+
         {/* 内核 */}
         <mesh ref={innerMesh} scale={isActive ? 1.0 : 0.6}>
           <octahedronGeometry args={[1, 0]} />
-          <meshStandardMaterial 
+          <meshStandardMaterial
             color={color} emissive={color} emissiveIntensity={glowIntensity}
             toneMapped={false} transparent opacity={nodeOpacity}
           />
@@ -107,9 +114,9 @@ export default function NodeMarker({ node, isActive, isRelated, onClick }) {
 
         {/* 🔥 [关键修改]：恒定大小全息浮窗 */}
         <Html
-          position={[0, 4.0, 0]} 
+          position={[0, 4.0, 0]}
           center
-          zIndexRange={[100, 0]} 
+          zIndexRange={[100, 0]}
           style={{
             pointerEvents: 'none',
             opacity: isHovered ? 1 : 0,
@@ -118,7 +125,7 @@ export default function NodeMarker({ node, isActive, isRelated, onClick }) {
           }}
         >
           {isHovered && (
-            <div 
+            <div
               className="w-64 bg-black/90 backdrop-blur-md border-l-4 border-cyan-500 p-4 shadow-[0_0_30px_rgba(0,242,255,0.2)] flex flex-col gap-2 rounded-r-sm"
             >
               <div className="flex justify-between items-start">
@@ -138,27 +145,27 @@ export default function NodeMarker({ node, isActive, isRelated, onClick }) {
             </div>
           )}
         </Html>
-        
+
         {/* 文字 Billboard */}
         <Billboard position={[0, 2.2, 0]}>
-            <Text 
-              fontSize={isActive ? 1.8 : 1.0} 
-              color={textColor} 
-              anchorX="center" anchorY="middle" 
-              fillOpacity={textOpacity} 
-              outlineWidth={0.05} outlineColor="#000000"
-            >
-              {node.id}
-            </Text>
+          <Text
+            fontSize={isActive ? 1.8 : 1.0}
+            color={textColor}
+            anchorX="center" anchorY="middle"
+            fillOpacity={textOpacity}
+            outlineWidth={0.05} outlineColor="#000000"
+          >
+            {node.id}
+          </Text>
         </Billboard>
       </Float>
-      
+
       {/* 能量束 */}
       <Line
-        points={[[0, groundY, 0], [0, crystalY - 0.8, 0]]} 
+        points={[[0, groundY, 0], [0, crystalY - 0.8, 0]]}
         color={color} lineWidth={1} dashed={true} dashScale={5} opacity={0.3} transparent toneMapped={false}
       />
-      
+
       {/* 底座 */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, groundY + 0.05, 0]}>
         <ringGeometry args={[0.3, 0.5, 32]} />
@@ -166,4 +173,4 @@ export default function NodeMarker({ node, isActive, isRelated, onClick }) {
       </mesh>
     </group>
   );
-}
+});

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useGameStore } from '../../store/store';
+import { t } from '../../i18n';
 
 interface NoteEditorProps {
   isOpen: boolean;
@@ -7,7 +8,7 @@ interface NoteEditorProps {
 }
 
 export default function NoteEditor({ isOpen, onClose }: NoteEditorProps) {
-  const { centerNode, saveNote } = useGameStore();
+  const { centerNode, saveNote, uiLang } = useGameStore();
   const [text, setText] = useState("");
 
   useEffect(() => {
@@ -74,14 +75,14 @@ export default function NoteEditor({ isOpen, onClose }: NoteEditorProps) {
         {/* 2. 编辑区域 (自动撑开 flex-1) */}
         <div className="flex-1 flex flex-col relative bg-black/50 rounded-xl overflow-hidden border border-white/5 focus-within:border-cyan-500/40 transition-all">
             <div className="bg-cyan-950/40 px-3 py-1.5 text-[8px] text-cyan-400 font-mono tracking-widest flex justify-between border-b border-white/5">
-                <span>INSCRIBE_MEMORY_FRAGMENT</span>
-                <span className="animate-pulse">ONLINE</span>
+                <span>{t(uiLang, 'note.inscribe')}</span>
+                <span className="animate-pulse">{t(uiLang, 'book.online')}</span>
             </div>
             
             <textarea
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                placeholder="在此注入战术笔记..."
+                placeholder={t(uiLang, 'note.placeholder')}
                 className="flex-1 bg-transparent text-cyan-50 p-5 font-serif text-base focus:outline-none resize-none leading-relaxed placeholder:opacity-10 scrollbar-thin scrollbar-thumb-cyan-900"
                 autoFocus
             />
@@ -96,10 +97,10 @@ export default function NoteEditor({ isOpen, onClose }: NoteEditorProps) {
                 onClick={handleSave}
                 className="group w-full py-4 bg-cyan-600/10 border border-cyan-500/40 text-cyan-400 font-mono text-xs tracking-[0.3em] hover:bg-cyan-500 hover:text-black transition-all duration-300 uppercase font-black rounded flex items-center justify-center gap-3"
             >
-                <span>SYNCHRONIZE</span>
+                <span>{t(uiLang, 'note.sync')}</span>
                 <svg className="w-4 h-4 group-hover:translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
             </button>
-            <div className="text-center text-[7px] text-cyan-900 tracking-tighter">DATA INTEGRITY GUARANTEED BY CHIRAL NETWORK</div>
+            <div className="text-center text-[7px] text-cyan-900 tracking-tighter">{t(uiLang, 'note.integrity')}</div>
         </div>
 
         {/* 4. 左侧锚点线条 (增加悬浮实感) */}

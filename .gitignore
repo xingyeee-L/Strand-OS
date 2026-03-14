@@ -26,3 +26,10 @@ __pycache__/
 node_modules
 backend/dist/
 release/
+
+# --- 5. Secrets / Env files ---
+.env
+.env.*
+backend/.env
+backend/.env.*
+!backend/.env.example

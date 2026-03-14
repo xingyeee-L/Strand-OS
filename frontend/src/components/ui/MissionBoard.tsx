@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useGameStore } from '../../store/store';
 import BookManager from './BookManager'; 
+import { t } from '../../i18n';
 
 export default function MissionBoard() {
-  const { missions, jumpTo, requestExtraMission, cancelMission } = useGameStore();
+  const { missions, jumpTo, requestExtraMission, cancelMission, uiLang } = useGameStore();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [showBooks, setShowBooks] = useState(false);
 
@@ -44,7 +45,7 @@ export default function MissionBoard() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
           </svg>
           <div className="writing-vertical-rl text-[9px] font-mono tracking-[0.2em] text-gray-500 uppercase flex-1 flex items-center justify-center group-hover:text-cyan-400">
-              {isCollapsed ? 'OPEN_DATA' : 'MISSIONS'}
+              {isCollapsed ? t(uiLang, 'mission.openData') : t(uiLang, 'mission.missions')}
           </div>
           {/* 进度点指示器 */}
           <div className="w-1 h-1 bg-cyan-500 rounded-full animate-pulse mb-2"></div>
@@ -57,15 +58,15 @@ export default function MissionBoard() {
           {/* A. 头部：固定不动 */}
           <div className="p-5 pb-3 border-b border-white/5 flex justify-between items-end bg-cyan-950/10">
               <div className="flex flex-col">
-                  <h3 className="text-sm font-black text-white tracking-widest font-mono">DAILY ORDERS</h3>
+                  <h3 className="text-sm font-black text-white tracking-widest font-mono">{t(uiLang, 'mission.dailyOrders')}</h3>
                   <div className="text-[9px] text-cyan-600 font-bold mt-1">
-                    {missions.filter(m => m.status === 'active').length} PENDING
+                    {missions.filter(m => m.status === 'active').length} {t(uiLang, 'mission.pendingCount')}
                   </div>
               </div>
               <button 
                   onClick={() => setShowBooks(true)} 
                   className="text-gray-500 hover:text-cyan-400 p-1.5 border border-white/10 rounded-lg hover:bg-cyan-500/10 transition-all"
-                  title="Switch Vocabulary Data"
+                  title={t(uiLang, 'mission.switchVocabulary')}
               >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
@@ -77,7 +78,7 @@ export default function MissionBoard() {
           <div className="flex-1 overflow-y-auto p-5 space-y-6 scrollbar-thin scrollbar-thumb-cyan-900/50 scrollbar-track-transparent">
               {missions.length === 0 && (
                   <div className="text-gray-700 text-xs italic text-center py-10 border border-dashed border-gray-800 rounded">
-                      NO DATA STREAMS
+                      {t(uiLang, 'mission.noStreams')}
                   </div>
               )}
             {missions.map((m) => (
@@ -86,14 +87,14 @@ export default function MissionBoard() {
                 <div className="flex justify-between items-center mb-2">
                   <div className="flex items-center gap-2">
                     <span className={`text-[8px] px-1.5 py-0.5 rounded font-bold tracking-tighter ${m.type.includes('review') ? 'bg-orange-950/50 text-orange-500 border border-orange-500/20' : 'bg-cyan-950/50 text-cyan-500 border border-cyan-500/20'}`}>
-                      {m.type.includes('review') ? 'REINFORCE' : 'EXPLORE'}
+                      {m.type.includes('review') ? t(uiLang, 'mission.reinforce') : t(uiLang, 'mission.explore')}
                     </span>
                 {/* 🔥 [新增] 取消按钮：仅在 Block 悬停时显现，保持界面整洁 */}
                     <button 
                         onClick={() => cancelMission(m.id)}
                         className="opacity-0 group-hover/block:opacity-100 transition-opacity text-red-500/50 hover:text-red-500 text-[8px] font-mono"
                       >
-                        [ ABORT ]
+                        {t(uiLang, 'mission.abort')}
                     </button>
                   </div>
                   <span className="text-[9px] text-gray-500 font-mono">+{m.xp_reward}XP</span>
@@ -117,7 +118,7 @@ export default function MissionBoard() {
                                   <div className={`w-1 h-1 rounded-full ${t.reviewed ? 'bg-green-600' : 'bg-orange-500 animate-pulse'}`}></div>
                                   <span className={`font-mono ${t.reviewed ? 'line-through' : 'font-bold'}`}>{t.word}</span>
                               </div>
-                              {t.reviewed && <span className="text-[7px] font-bold">OK</span>}
+                              {t.reviewed && <span className="text-[7px] font-bold">{t(uiLang, 'mission.ok')}</span>}
                           </button>
                       ))}
                   </div>
@@ -140,7 +141,7 @@ export default function MissionBoard() {
                   className="w-full py-3 bg-cyan-500/5 border border-cyan-500/20 text-cyan-500 font-mono text-[10px] tracking-[0.2em] hover:bg-cyan-500 hover:text-black transition-all duration-300 uppercase font-bold rounded flex items-center justify-center gap-2"
               >
                   <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/></svg>
-                  REQUEST_DATA_SLOT
+                  {t(uiLang, 'mission.requestSlot')}
               </button>
           </div>
 

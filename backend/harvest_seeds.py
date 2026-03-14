@@ -3,7 +3,7 @@ import uuid
 import json
 from sqlmodel import Session, select
 from langchain_core.documents import Document
-from app.core.database import engine, get_vector_store, create_db_and_tables
+from app.config.database import create_db_and_tables, engine, get_vector_store
 from app.models.schemas import WordNode
 from app.services.brain import BrainService
 from metaphone import doublemetaphone

@@ -10,18 +10,12 @@ from datetime import datetime, timedelta
 from rapidfuzz import process, fuzz
 from metaphone import doublemetaphone
 from sqlmodel import select, Session
-try:
-    from langchain_ollama import OllamaLLM as Ollama
-except ImportError:
-    from langchain_community.llms import Ollama
 from app.models.schemas import WordNode, NeuralLink
-from app.core.database import get_vector_store, engine
+from app.config.database import engine, get_vector_store, search_knowledge_fragments_bm25
+from app.config.llm_factory import get_llm
 from langchain_core.documents import Document
 
-# --- 全局配置 ---
-LLM_MODEL = "llama3.1"
-# 增加超时至 120s 以应对本地 M4 算力波动，确保后台任务能跑完
-llm = Ollama(model=LLM_MODEL, base_url="http://localhost:11434", timeout=120)
+llm = get_llm()
 
 # ==========================================
 # 🛰️ 第一部分：雷达策略模块 (Cloud Autocomplete)
@@ -320,19 +314,37 @@ class BrainService:
         return candidates[:10]
 
     @staticmethod
-    def retrieve_rag_context(query: str) -> str:
+    def retrieve_rag_context(query: str, session: Session | None = None) -> str:
         """RAG 检索：从向量库提取相关的历史笔记或档案"""
+        res = "\n[关联记忆碎片]:\n"
+        found = False
+
         try:
             vector_store = get_vector_store()
             docs = vector_store.similarity_search(query, k=2)
-            res = "\n[关联记忆碎片]:\n"
-            found = False
             for d in docs:
                 if len(d.page_content) > 30:
-                    res += f"- 来自《{d.metadata.get('source','未知')}》: \"{d.page_content[:100]}...\"\n"
+                    src = d.metadata.get("source", "未知")
+                    res += f"- (VECTOR) 来自《{src}》: \"{d.page_content[:120]}...\"\n"
                     found = True
-            return res if found else ""
-        except: return ""
+        except Exception:
+            pass
+
+        try:
+            hits = search_knowledge_fragments_bm25(
+                query=query,
+                limit=3,
+                fragment_types=["NOTE", "DISTILLED"],
+            )
+            for h in hits:
+                content = (h.get("content") or "").strip()
+                if len(content) > 30:
+                    res += f"- (BM25) 来自《{h.get('source_file', '未知')}》: \"{content[:120]}...\"\n"
+                    found = True
+        except Exception:
+            pass
+
+        return res if found else ""
 
     @staticmethod
     def analyze_etymology(word: str) -> str:

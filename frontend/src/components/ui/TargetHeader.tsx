@@ -2,9 +2,10 @@ import { useRef, useState } from 'react';
 import { useGameStore } from '../../store/store';
 import { useTypewriter } from '../../hooks/useTypewriter';
 import NoteEditor from './NoteEditor'; // 🔥 确保此文件已存在
+import { t } from '../../i18n';
 
 export default function TargetHeader() {
-  const { centerNode, isScanning, uploadFile } = useGameStore();
+  const { centerNode, isScanning, uploadFile, uiLang } = useGameStore();
   
   // --- A. Data Uplink Logic (右翼) ---
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -25,10 +26,10 @@ export default function TargetHeader() {
   const [isEditorOpen, setIsEditorOpen] = useState(false);
 
   // --- C. Display Logic ---
-  const title = centerNode?.id || "NO TARGET";
-  const rawDefinition = isScanning 
-    ? "SCANNING..." 
-    : (centerNode?.content || "SYSTEM STANDBY");
+  const title = centerNode?.id || t(uiLang, 'target.noTarget');
+  const rawDefinition = isScanning
+    ? t(uiLang, 'target.scanning')
+    : (centerNode?.content || t(uiLang, 'target.standby'));
   
   const displayDefinition = useTypewriter(rawDefinition, 5);
 
@@ -72,7 +73,7 @@ export default function TargetHeader() {
                           Lv.{centerNode.mastery_level}
                       </span>
                       <span className="text-[9px] border border-gray-700 text-gray-400 px-1 rounded bg-black">
-                          SECURE
+                          {t(uiLang, 'target.secure')}
                       </span>
                   </div>
               )}
@@ -92,7 +93,7 @@ export default function TargetHeader() {
               <button
                   onClick={() => setIsEditorOpen(true)} // 🔥 唤起全息编辑器
                   className="relative w-10 h-10 flex items-center justify-center border border-cyan-800 bg-black/80 hover:bg-cyan-900/30 hover:border-cyan-400 transition-all rounded-l-md"
-                  title="添加单词笔记"
+                  title={t(uiLang, 'target.addNoteTitle')}
               >
                   {/* 如果 centerNode 有笔记，图标颜色加深或点亮 (可选视觉反馈) */}
                   <svg 
@@ -102,7 +103,7 @@ export default function TargetHeader() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                   </svg>
                   <div className="absolute top-full mt-1 right-0 text-[8px] font-bold tracking-widest text-cyan-700 uppercase whitespace-nowrap opacity-0 group-hover/note:opacity-100 transition-opacity">
-                      ADD NOTE
+                      {t(uiLang, 'target.addNote')}
                   </div>
               </button>
           </div>
@@ -114,7 +115,7 @@ export default function TargetHeader() {
                   onClick={() => fileInputRef.current?.click()}
                   disabled={isUploading}
                   className="relative w-10 h-10 flex items-center justify-center focus:outline-none"
-                  title="上传全局记忆 (RAG)"
+                  title={t(uiLang, 'target.uploadTitle')}
               >
                   <div className={`absolute inset-0 border-2 border-dashed rounded-full transition-all duration-1000 
                       ${isUploading 
@@ -137,7 +138,7 @@ export default function TargetHeader() {
                       </svg>
                   </div>
                   <div className="absolute top-full mt-1 left-0 text-[8px] font-bold tracking-widest text-cyan-700 uppercase whitespace-nowrap opacity-0 group-hover/uplink:opacity-100 transition-opacity">
-                      {isUploading ? "UPLOADING..." : "INGEST DATA"}
+                      {isUploading ? t(uiLang, 'target.uploading') : t(uiLang, 'target.ingestData')}
                   </div>
               </button>
           </div>

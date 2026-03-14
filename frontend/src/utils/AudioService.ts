@@ -1,3 +1,5 @@
+import { SFX_URLS } from '../assets/sounds';
+
 class AudioService {
   private isInitialized: boolean = false;
 
@@ -12,13 +14,13 @@ class AudioService {
 
   // 2. 播放战术音效
   public playSFX(name: string, volume: number = 0.4) {
-    const audio = new Audio(`/sounds/${name}.mp3`);
+    const audio = new Audio(SFX_URLS[name] || `/sounds/${name}.mp3`);
     audio.volume = volume;
     audio.play().catch(() => {}); // 捕获未握手时的浏览器拦截
   }
 
   // 3. 战术语音播报 (TTS - 模拟无线电质感)
-  public speak(text: string) {
+  public speak(text: string, onStart?: () => void, onEnd?: () => void) {
     if (!window.speechSynthesis || !text) return;
 
     // 强行停止之前的播报，防止重叠
@@ -35,12 +37,33 @@ class AudioService {
       utterance.lang = 'en-US';
     }
 
-    // 🔥 战术调音：降低音调(Pitch)，略微加快速度(Rate)，制造冷静、略带压抑的 AI 感
-    utterance.rate = 1.15;  // 略快，表现专业性
-    utterance.pitch = 0.75; // 低沉，更有磁性
+    // 🔥 战术调音
+    utterance.rate = 1.15;
+    utterance.pitch = 0.75;
     utterance.volume = 0.8;
 
+    if (onStart) utterance.onstart = onStart;
+    if (onEnd) utterance.onend = onEnd;
+
     window.speechSynthesis.speak(utterance);
+  }
+
+  public stopSpeaking() {
+    if (window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+  }
+
+  public pauseSpeaking() {
+    if (window.speechSynthesis) {
+      window.speechSynthesis.pause();
+    }
+  }
+
+  public resumeSpeaking() {
+    if (window.speechSynthesis) {
+      window.speechSynthesis.resume();
+    }
   }
 }
 

@@ -16,11 +16,20 @@ class WordNode(SQLModel, table=True):
     next_review: Optional[datetime] = None  # 下次复习时间
     review_stage: int = 0                   # 当前阶段 (0=新词, 1=1天, 2=3天...)
 
+class Source(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    original_filename: str
+    content_type: Optional[str] = None
+    storage_uri: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
 class KnowledgeFragment(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     content: str
     source_file: str  # 笔记存为 "NOTE:word"
     embedding_id: Optional[str] = None # 🔥 确保这一行存在
+    fragment_type: str = Field(default="NOTE", index=True)
+    source_id: Optional[int] = Field(default=None, foreign_key="source.id")
 
 class NeuralLink(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)

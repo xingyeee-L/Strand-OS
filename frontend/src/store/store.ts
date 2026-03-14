@@ -1,5 +1,79 @@
 import { create } from 'zustand';
-import axios from 'axios';
+import { apiClient } from '../services/apiClient';
+import { getInitialUiLang, persistUiLang, type UiLang } from '../i18n';
+
+type LinkStreamMeta = {
+  type: 'meta';
+  status: string;
+  xp_gained: number;
+  total_xp: number;
+  level: number;
+};
+
+type LinkStreamDelta = { type: 'delta'; delta: string };
+
+type LinkStreamResult = {
+  type: 'result';
+  status: string;
+  narrative: string;
+  xp_gained: number;
+  total_xp: number;
+  level: number;
+};
+
+type LinkStreamEvent = LinkStreamMeta | LinkStreamDelta | LinkStreamResult;
+
+async function postSSE<TBody>(
+  path: string,
+  body: TBody,
+  onEvent: (event: LinkStreamEvent) => void,
+) {
+  const baseURL = apiClient.defaults.baseURL || '';
+  const url = new URL(path, baseURL).toString();
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Accept: 'text/event-stream',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    throw new Error(`SSE request failed: ${res.status}`);
+  }
+  if (!res.body) {
+    throw new Error('SSE response body missing');
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+
+    while (true) {
+      const sepIndex = buffer.indexOf('\n\n');
+      if (sepIndex === -1) break;
+
+      const raw = buffer.slice(0, sepIndex);
+      buffer = buffer.slice(sepIndex + 2);
+
+      const lines = raw.split('\n');
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue;
+        const data = line.slice(5).trim();
+        if (!data) continue;
+        onEvent(JSON.parse(data) as LinkStreamEvent);
+      }
+    }
+  }
+}
 
 // --- 1. 类型定义 ---
 export interface GalaxyNode {
@@ -35,20 +109,29 @@ export interface Mission {
   targets: MissionTarget[]; // 🔥 新字段
 }
 
+export interface BookInfo {
+  name: string;
+  total: number;
+}
+
+export type AgentState = 'idle' | 'listening' | 'observing' | 'synthesizing' | 'speaking';
+
 interface GameState {
   centerNode: GalaxyNode | null;
   neighbors: GalaxyNode[];
   user: UserProfile;
   missions: Mission[];
+  uiLang: UiLang;
   
   // 状态标志
   isScanning: boolean;
   isLinking: boolean;
+  agentState: AgentState;
   scanResult: any;
   activeNodeId: string | null;
   lastNarrative: string | null;
   hoveredNodeId: string | null; // 当前悬停的节点ID
-  availableBooks: string[];
+  availableBooks: BookInfo[];
   currentBook: string | null;
   bookProgress: number;
 
@@ -57,6 +140,7 @@ interface GameState {
   setBook: (bookName: string) => Promise<void>;
   requestExtraMission: () => Promise<void>;
   initWorld: () => Promise<void>;
+  setUiLang: (lang: UiLang) => void;
   // 🔥 更新：支持 definition 参数
   saveNote: (note: string) => Promise<void>;
   jumpTo: (word: string, targetPos?: [number, number, number], definition?: string) => Promise<void>;
@@ -69,23 +153,450 @@ interface GameState {
   performDeepScan: () => Promise<void>;
   // 添加这一行
   deleteCurrentNode: () => Promise<void>;
+  analyzeVision: (imageB64: string, text?: string) => Promise<void>;
+  agentChat: (text: string) => Promise<void>;
+  setAgentState: (state: AgentState) => void;
   setHoveredNodeId: (id: string | null) => void;
   completeMission: (word: string, analysis?: string) => Promise<void>; 
   cancelMission: (missionId: number) => Promise<void>;
-  showNarrative: (targetId: string) => void; 
+  showNarrative: (targetId: string) => Promise<void>; 
 }
 
 const ORBIT_RADIUS = 18; 
 
-// --- 2. 状态实现 ---
+const createUISlice = (set: any) => ({
+  setLastNarrative: (text: string | null) => set({ lastNarrative: text }),
+  setActiveNode: (id: string | null) => set({ activeNodeId: id }),
+  setHoveredNodeId: (id: string | null) => set({ hoveredNodeId: id }),
+  setAgentState: (state: AgentState) => set({ agentState: state }),
+  setUiLang: (lang: UiLang) => {
+    persistUiLang(lang);
+    set({ uiLang: lang });
+  },
+  agentChat: async (text: string) => {
+     set({ agentState: 'synthesizing' });
+     try {
+       const res = await apiClient.post('/agent/chat', { text });
+       set({ lastNarrative: res.data.response, agentState: 'speaking' });
+       setTimeout(() => set({ agentState: 'idle' }), 3000);
+     } catch (e) {
+      console.error('Agent chat failed', e);
+      const detail = (e as any)?.response?.data?.detail;
+      set({ agentState: 'idle', lastNarrative: detail || '对话失败，请检查网络或后端日志。' });
+    }
+  },
+});
 
-export const useGameStore = create<GameState>((set, get) => ({
+const createMissionSlice = (set: any, get: any) => ({
+  cancelMission: async (missionId: number) => {
+    if (!window.confirm('TERMINATE THIS MISSION? 所有进度将丢失。')) return;
+
+    try {
+      await apiClient.delete(`/missions/${missionId}`);
+      await get().fetchMissions();
+    } catch (e) {
+      console.error('Failed to abort mission', e);
+    }
+  },
+  requestExtraMission: async () => {
+    try {
+      await apiClient.post('/missions/add_extra');
+      await get().fetchMissions();
+    } catch (e) {
+      console.error('Extra mission failed', e);
+    }
+  },
+  completeMission: async (word: string, analysis?: string) => {
+    const { centerNode } = get();
+    if (!centerNode) return;
+
+    set({ isLinking: true });
+
+    try {
+      const res = await apiClient.post('/mission/complete_word', {
+        word_id: word,
+        analysis: analysis || '',
+      });
+
+      if (res.data.status === 'reviewed') {
+        const ai_analysis = res.data.analysis;
+
+        await get().fetchMissions();
+
+        set({
+          centerNode: {
+            ...centerNode,
+            is_reviewed_today: true,
+            note: ai_analysis,
+          },
+          lastNarrative: ai_analysis,
+        });
+
+        const userRes = await apiClient.get('/user/profile');
+        set({ user: userRes.data });
+      }
+    } catch (e) {
+      console.error('Mission completion failed:', e);
+    } finally {
+      set({ isLinking: false });
+    }
+  },
+  fetchMissions: async () => {
+    try {
+      const res = await apiClient.get('/missions/daily');
+      set({ missions: res.data });
+    } catch (e) {
+      console.error(e);
+    }
+  },
+});
+
+const createUserSlice = (set: any, get: any) => ({
+  fetchBooks: async () => {
+    const res = await apiClient.get('/books/list');
+    const userRes = await apiClient.get('/user/profile');
+    set({
+      availableBooks: res.data,
+      currentBook: userRes.data.current_book,
+      bookProgress: userRes.data.book_progress_index,
+    });
+  },
+  setBook: async (bookName: string) => {
+    await apiClient.post(`/user/set_book`, null, { params: { book_name: bookName } });
+    set({ currentBook: bookName });
+    await get().fetchMissions();
+  },
+});
+
+const createGraphSlice = (set: any, get: any) => ({
+  initWorld: async () => {
+    await get().jumpTo('Strand', [0, 0, 0]);
+
+    try {
+      await apiClient.post('/missions/generate');
+    } catch (e) {
+      console.warn('[Mission] Failed to generate missions:', e);
+    }
+
+    await get().fetchMissions();
+  },
+  jumpTo: async (word: string, targetPos?: [number, number, number], definition?: string) => {
+    if (!word) return;
+    set({ isScanning: true });
+
+    let currentPos = targetPos;
+    if (!currentPos) {
+      const existingNode = get().neighbors.find((n: any) => n.id === word);
+
+      if (existingNode) {
+        currentPos = existingNode.position;
+      } else {
+        const JUMP_RADIUS = 40;
+        const MAP_BOUNDARY = 120;
+
+        const prevPos = get().centerNode?.position || [0, 0, 0];
+        const angle = Math.random() * Math.PI * 2;
+
+        let nextX = prevPos[0] + JUMP_RADIUS * Math.cos(angle);
+        let nextZ = prevPos[2] + JUMP_RADIUS * Math.sin(angle);
+
+        const distFromOrigin = Math.sqrt(nextX ** 2 + nextZ ** 2);
+        if (distFromOrigin > MAP_BOUNDARY) {
+          const resetRadius = 30 + Math.random() * 20;
+          nextX = resetRadius * Math.cos(angle);
+          nextZ = resetRadius * Math.sin(angle);
+        }
+
+        currentPos = [nextX, 0, nextZ];
+      }
+    }
+
+    try {
+      const [graphRes, userRes] = await Promise.all([
+        apiClient.post('/graph/context', { word, definition }),
+        apiClient.get('/user/profile'),
+      ]);
+
+      const { center, neighbors } = graphRes.data;
+
+      if (!center) {
+        set({ isScanning: false });
+        return;
+      }
+
+      const layoutNeighbors = neighbors.map((n: any, index: number) => {
+        const [rx, , rz] = n.position || [
+          ORBIT_RADIUS * Math.cos((index / neighbors.length) * Math.PI * 2),
+          0,
+          ORBIT_RADIUS * Math.sin((index / neighbors.length) * Math.PI * 2),
+        ];
+
+        return {
+          ...n,
+          position: [currentPos![0] + rx, 0, currentPos![2] + rz],
+        };
+      });
+
+      set({
+        centerNode: { ...center, position: currentPos },
+        neighbors: layoutNeighbors,
+        user: userRes.data,
+        isScanning: false,
+        lastNarrative: null,
+        activeNodeId: word,
+      });
+    } catch (error) {
+      console.error('Jump failed:', error);
+      set({ isScanning: false });
+    }
+  },
+  addNode: async (word: string) => {
+    await get().jumpTo(word);
+  },
+  establishLink: async (targetId: string, type: string, action = 'toggle') => {
+    const { centerNode, neighbors } = get();
+    if (!centerNode) return;
+
+    set({ isLinking: true });
+
+    try {
+      const payload = {
+        source_id: centerNode.id,
+        target_id: targetId,
+        type: type,
+        action: action,
+      };
+
+      let streamed = '';
+      let result: LinkStreamResult | null = null;
+
+      set({ lastNarrative: null });
+
+      try {
+        await postSSE('/link/stream', payload, (event) => {
+          if (event.type === 'delta') {
+            streamed += event.delta;
+            set({ lastNarrative: streamed });
+          } else if (event.type === 'result') {
+            result = event;
+          }
+        });
+      } catch {
+        const res = await apiClient.post('/link', payload);
+        result = {
+          type: 'result',
+          status: res.data.status,
+          narrative: res.data.narrative,
+          xp_gained: res.data.xp_gained ?? 0,
+          total_xp: res.data.total_xp,
+          level: res.data.level,
+        };
+      }
+
+      if (!result) {
+        throw new Error('Link stream finished without result');
+      }
+
+      const { status, narrative, total_xp, level } = result;
+
+      const newNeighbors = neighbors.map((n: any) => {
+        if (n.id === targetId) {
+          const isNewlyCreated = status === 'created';
+          const isUpdated = status === 'updated';
+          const isDeleted = status === 'deleted';
+
+          return {
+            ...n,
+            is_linked: isNewlyCreated || isUpdated || status === 'exists',
+            narrative: isDeleted ? undefined : narrative,
+            hasUnseenLog: isDeleted ? false : isNewlyCreated || isUpdated,
+          };
+        }
+        return n;
+      });
+
+      set({
+        neighbors: newNeighbors,
+        lastNarrative: status === 'created' ? narrative : get().lastNarrative,
+        user: { ...get().user, current_xp: total_xp, level },
+      });
+
+      if (status === 'created') {
+        set((state: any) => ({
+          neighbors: state.neighbors.map((n: any) =>
+            n.id === targetId ? { ...n, hasUnseenLog: false } : n,
+          ),
+        }));
+      }
+    } catch (e) {
+      console.error('[Store] Link protocol failed:', e);
+    } finally {
+      set({ isLinking: false });
+    }
+  },
+  showNarrative: async (targetId: string) => {
+    const { neighbors, establishLink } = get();
+
+    const targetNode = neighbors.find((n: any) => n.id === targetId);
+
+    if (targetNode) {
+      if (targetNode.is_linked && !targetNode.narrative) {
+        await establishLink(targetId, targetNode.relation || 'auto', 'toggle');
+        return;
+      }
+
+      if (targetNode.narrative) {
+        set({ lastNarrative: null });
+
+        setTimeout(() => {
+          set({ lastNarrative: targetNode.narrative });
+        }, 10);
+
+        set((state: any) => ({
+          neighbors: state.neighbors.map((n: any) =>
+            n.id === targetId ? { ...n, hasUnseenLog: false } : n,
+          ),
+        }));
+      }
+    }
+  },
+  performDeepScan: async () => {
+    const { centerNode } = get();
+    if (!centerNode) return;
+    const word = centerNode.id;
+
+    set({ isScanning: true });
+
+    try {
+      await apiClient.post('/node/deep_scan', { word });
+
+      let attempts = 0;
+      const maxAttempts = 8;
+
+      const interval = setInterval(async () => {
+        attempts++;
+
+        const res = await apiClient.post('/graph/context', { word });
+        const { neighbors } = res.data;
+
+        const currentNeighbors = get().neighbors;
+
+        const currentPos = get().centerNode!.position;
+        const layoutNeighbors = neighbors.map((n: any, index: number) => {
+          const total = neighbors.length;
+          const angle = (index / total) * Math.PI * 2;
+          return {
+            ...n,
+            position: [currentPos[0] + 18 * Math.cos(angle), 0, currentPos[2] + 18 * Math.sin(angle)],
+          };
+        });
+
+        set({ neighbors: layoutNeighbors });
+
+        if (neighbors.length > currentNeighbors.length || attempts >= maxAttempts) {
+          if (attempts >= maxAttempts) {
+            set({ isScanning: false });
+            clearInterval(interval);
+          }
+        }
+      }, 2000);
+    } catch (e) {
+      console.error('Deep scan trigger failed', e);
+      set({ isScanning: false });
+    }
+  },
+  deleteCurrentNode: async () => {
+    const { centerNode } = get();
+    if (!centerNode) return;
+
+    if (
+      !window.confirm(
+        `WARNING: Initiate Voidout for "${centerNode.id}"?\n此操作不可逆，将永久删除该节点及所有连接。`,
+      )
+    ) {
+      return;
+    }
+
+    try {
+      await apiClient.delete(`/node/${centerNode.id}`);
+      await get().jumpTo('fernweh');
+    } catch (e) {
+      console.error('Voidout failed:', e);
+      alert('销毁失败，数据残留。');
+    }
+  },
+  analyzeVision: async (imageB64: string, text?: string) => {
+    set({ isScanning: true });
+    try {
+      const res = await apiClient.post('/agent/vision_analyze', {
+        image_base64: imageB64,
+        text,
+      });
+      const { summary, suggestions } = res.data;
+      const narrative = `${summary}\n\n建议:\n${suggestions.map((s: string) => `- ${s}`).join('\n')}`;
+      set({ lastNarrative: narrative, isScanning: false });
+    } catch (e) {
+      console.error('Vision analysis failed', e);
+      const detail = (e as any)?.response?.data?.detail;
+      set({ isScanning: false, lastNarrative: detail || "视觉分析失败，请检查网络或配置。" });
+    }
+  },
+});
+
+const createKnowledgeSlice = (set: any, get: any) => ({
+  uploadFile: async (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      set({ agentState: 'synthesizing' });
+      const res = await apiClient.post('/knowledge/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      const msg =
+        res?.data?.status === 'success'
+          ? `上传成功：${file.name}`
+          : `上传完成：${file.name}`;
+      set({ lastNarrative: msg, agentState: 'speaking' });
+      setTimeout(() => set({ agentState: 'idle' }), 2500);
+    } catch (e) {
+      console.error(e);
+      set({ lastNarrative: '上传失败，请检查网络或后端日志。', agentState: 'idle' });
+    }
+  },
+  saveNote: async (noteContent: string) => {
+    const { centerNode } = get();
+
+    if (!centerNode) {
+      console.warn('[Store] No active node to attach note.');
+      return;
+    }
+
+    try {
+      const res = await apiClient.post('/node/note', {
+        word_id: centerNode.id,
+        note_content: noteContent,
+      });
+
+      if (res.data.status === 'success') {
+        set((state: any) => ({
+          centerNode: state.centerNode ? { ...state.centerNode, note: noteContent } : null,
+        }));
+      }
+    } catch (e) {
+      console.error('[Store] Failed to save note:', e);
+    }
+  },
+});
+
+const initialState = {
   centerNode: null,
   neighbors: [],
   user: { level: 1, current_xp: 0, next_level_xp: 100 },
   missions: [],
+  uiLang: getInitialUiLang(),
   isScanning: false,
   isLinking: false,
+  agentState: 'idle' as AgentState,
   scanResult: null,
   activeNodeId: null,
   lastNarrative: null,
@@ -93,443 +604,13 @@ export const useGameStore = create<GameState>((set, get) => ({
   availableBooks: [],
   currentBook: null,
   bookProgress: 0,
+};
 
-  setLastNarrative: (text) => set({ lastNarrative: text }),
-  setActiveNode: (id) => set({ activeNodeId: id }),
-  setHoveredNodeId: (id) => set({ hoveredNodeId: id }),
-  // 在 useGameStore 实现中：
-  cancelMission: async (missionId: number) => {
-    // 战术建议：增加一个简单的确认，防止手滑
-    if (!window.confirm("TERMINATE THIS MISSION? 所有进度将丢失。")) return;
-
-    try {
-        await axios.delete(`http://127.0.0.1:8000/missions/${missionId}`);
-        // 刷新列表
-        await get().fetchMissions();
-        console.log(`[Mission] Protocol ${missionId} terminated.`);
-    } catch (e) {
-        console.error("Failed to abort mission", e);
-    }
-  },
-  fetchBooks: async () => {
-    const res = await axios.get('http://127.0.0.1:8000/books/list');
-    const userRes = await axios.get('http://127.0.0.1:8000/user/profile');
-    set({ 
-        availableBooks: res.data,
-        currentBook: userRes.data.current_book,
-        bookProgress: userRes.data.book_progress_index
-    });
-  },
-
-  setBook: async (bookName) => {
-    await axios.post(`http://127.0.0.1:8000/user/set_book?book_name=${bookName}`);
-    set({ currentBook: bookName });
-    await get().fetchMissions();
-  },
-  requestExtraMission: async () => {
-    try {
-        await axios.post('http://127.0.0.1:8000/missions/add_extra');
-        await get().fetchMissions(); // 刷新列表
-    } catch (e) {
-        console.error("Extra mission failed", e);
-    }
-},
-completeMission: async (word: string, analysis?: string) => {
-    const { centerNode } = get();
-    if (!centerNode) return;
-
-    // 🔥 [关键修复 1]：激活刻录状态，触发 UI 显示“正在刻录...”
-    set({ isLinking: true });
-
-    try {
-        const res = await axios.post('http://127.0.0.1:8000/mission/complete_word', { 
-            word_id: word, 
-            analysis: analysis || "" 
-        });
-        
-        if (res.data.status === 'reviewed') {
-            const ai_analysis = res.data.analysis; // 获取 AI 生成的分析
-
-            // 1. 刷新任务列表
-            await get().fetchMissions();
-            
-            // 2. 🔥 [关键修复 2]：将 AI 分析结果直接推送到对话框
-            set({ 
-                centerNode: { 
-                    ...centerNode, 
-                    is_reviewed_today: true,
-                    note: ai_analysis 
-                },
-                lastNarrative: ai_analysis // 确保结果呈现到屏幕
-            });
-            
-            // 3. 刷新用户状态
-            const userRes = await axios.get('http://127.0.0.1:8000/user/profile');
-            set({ user: userRes.data });
-        }
-    } catch (e) {
-        console.error("Mission completion failed:", e);
-    } finally {
-        // 🔥 [关键修复 3]：无论成功失败，结束刻录状态
-        set({ isLinking: false });
-    }
-  },
-  initWorld: async () => {
-    // 1. 初始化位置
-    await get().jumpTo("Strand", [0, 0, 0]);
-    
-    // 2. 🔥 [新增] 触发每日任务生成 (后端会自己判断今天是否已生成)
-    try {
-        await axios.post('http://127.0.0.1:8000/missions/generate');
-        console.log("[Mission] Daily missions check completed.");
-    } catch (e) {
-        console.warn("[Mission] Failed to generate missions:", e);
-    }
-
-    // 3. 拉取最新任务列表
-    await get().fetchMissions();
-  },
-
-// 🔥 [核心引擎] 星系跳跃 & 节点创建
-  jumpTo: async (word: string, targetPos?: [number, number, number], definition?: string) => {
-    if (!word) return;
-    set({ isScanning: true });
-    
-     // A. 坐标计算逻辑升级
-    let currentPos = targetPos;
-    if (!currentPos) {
-        const existingNode = get().neighbors.find(n => n.id === word);
-        
-        if (existingNode) {
-            currentPos = existingNode.position;
-        } else {
-            // --- 🔥 [战术重构：环形折跃] ---
-            const JUMP_RADIUS = 40; // 每次跳跃的固定跨度
-            const MAP_BOUNDARY = 120; // 这里的边界必须小于 Terrain.tsx 里的 500
-            
-            const prevPos = get().centerNode?.position || [0, 0, 0];
-            
-            // 1. 生成随机角度 (0 ~ 360度)
-            const angle = Math.random() * Math.PI * 2;
-            
-            // 2. 计算候选新坐标
-            let nextX = prevPos[0] + JUMP_RADIUS * Math.cos(angle);
-            let nextZ = prevPos[2] + JUMP_RADIUS * Math.sin(angle);
-            
-            // 3. 边界引力检查 (Boundary Gravity Check)
-            // 如果新点离中心 (0,0,0) 太远，将其拉回原点附近的随机环带
-            const distFromOrigin = Math.sqrt(nextX ** 2 + nextZ ** 2);
-            if (distFromOrigin > MAP_BOUNDARY) {
-                console.log("⚠️ [SYSTEM] 接近手性边界，执行引力回航...");
-                // 强制将新坐标设定在离原点 30-50 米的随机环带内
-                const resetRadius = 30 + Math.random() * 20;
-                nextX = resetRadius * Math.cos(angle);
-                nextZ = resetRadius * Math.sin(angle);
-            }
-            
-            currentPos = [nextX, 0, nextZ];
-        }
-    }
-
-    try {
-      console.log("[Store] Jumping to:", word);
-
-      // B. 并行请求：获取星系数据 & 用户状态
-      // 传递 definition 确保新词能直接带入释义
-      const [graphRes, userRes] = await Promise.all([
-        axios.post('http://127.0.0.1:8000/graph/context', { 
-            word, 
-            definition 
-        }),
-        axios.get('http://127.0.0.1:8000/user/profile')
-      ]);
-
-      const { center, neighbors } = graphRes.data;
-      
-      // 熔断：如果后端没返回中心节点，终止
-      if (!center) {
-          console.error("[Store] Center node missing!");
-          set({ isScanning: false });
-          return;
-      }
-
-      // C. 布局计算：将相对坐标转换为世界绝对坐标
-      const layoutNeighbors = neighbors.map((n: any, index: number) => {
-        // 后端返回的是 [relX, 0, relZ]，基于 (0,0)
-        // 我们要把它加到 currentPos 上
-        // 如果后端没算坐标（理论上不会），默认用圆形分布
-        const [rx, , rz] = n.position || [
-            ORBIT_RADIUS * Math.cos((index / neighbors.length) * Math.PI * 2), 
-            0, 
-            ORBIT_RADIUS * Math.sin((index / neighbors.length) * Math.PI * 2)
-        ];
-        
-        return {
-          ...n,
-          position: [
-            currentPos![0] + rx, 
-            0, // Y轴由前端地形计算，这里填0
-            currentPos![2] + rz
-          ]
-        };
-      });
-
-      // D. 更新全局状态
-      set({ 
-        centerNode: { ...center, position: currentPos }, 
-        neighbors: layoutNeighbors,
-        user: userRes.data,
-        isScanning: false,
-        lastNarrative: null,
-        activeNodeId: word
-      });
-
-      // 🔥 [新增] 自动深扫逻辑 (Auto Odradek)
-      // 如果是拓荒新词（没有邻居），自动触发后台深度扫描
-     console.log(`[Cruise] Jump to ${word} completed.`);
-      
-    } catch (error) {
-      console.error("Jump failed:", error);
-      set({ isScanning: false });
-    }
-  },
-
-  // ✅ [恢复] 任务获取
-  fetchMissions: async () => {
-    try {
-      const res = await axios.get('http://127.0.0.1:8000/missions/daily');
-      set({ missions: res.data });
-    } catch (e) { console.error(e); }
-  },
-
-  // ✅ [恢复] 兼容层：addNode 直接调用 jumpTo
-  addNode: async (word: string) => {
-    // 现在的 jumpTo 已经足够智能，可以处理新词创建
-    await get().jumpTo(word);
-  },
-
-   // 🔥 [Action] 建立/修改物理链路
-  establishLink: async (targetId: string, type: string, action = 'toggle') => {
-    const { centerNode, neighbors } = get();
-    if (!centerNode) return;
-
-    // 只有在创建和重生成时显示 Linking 动画
-    set({ isLinking: true });
-
-    try {
-      const res = await axios.post('http://127.0.0.1:8000/link', {
-        source_id: centerNode.id,
-        target_id: targetId,
-        type: type,
-        action: action 
-      });
-      
-      const { status, narrative, total_xp, level } = res.data;
-      
-      const newNeighbors = neighbors.map(n => {
-          if (n.id === targetId) {
-              const isNewlyCreated = status === 'created';
-              const isUpdated = status === 'updated';
-              const isDeleted = status === 'deleted';
-
-              return { 
-                  ...n, 
-                  is_linked: isNewlyCreated || isUpdated || (status === 'exists'), 
-                  narrative: isDeleted ? undefined : narrative,
-                  // 🔥 [核心逻辑] 如果是后台重生成或者是新创建，标记为“有未读情报”
-                  // 如果是删除，则清除标记
-                  hasUnseenLog: isDeleted ? false : (isNewlyCreated || isUpdated)
-              };
-          }
-          return n;
-      });
-
-      set({ 
-        neighbors: newNeighbors,
-        // 如果是创建新连接，我们允许它直接弹出来（爽感反馈）
-        // 如果是重生成，保持静默，不修改 lastNarrative
-        lastNarrative: status === 'created' ? narrative : get().lastNarrative,
-        user: { ...get().user, current_xp: total_xp, level }
-      });
-
-      // 如果直接弹出了剧情，取消掉那个未读标记
-      if (status === 'created') {
-          set((state) => ({
-              neighbors: state.neighbors.map(n => n.id === targetId ? { ...n, hasUnseenLog: false } : n)
-          }));
-      }
-      
-    } catch (e) { 
-      console.error("[Store] Link protocol failed:", e); 
-    } finally {
-      set({ isLinking: false });
-    }
-  },
-
-  // 🔥 [新增 Action] 战术指令：点击展示情报
-  // 🔥 修复点 1：必须加上 async 关键字
-  showNarrative: async (targetId: string) => {
-    // 🔥 修复点 2：从 get() 中解构需要的 Action 和数据
-    const { neighbors, establishLink } = get();
-    
-    const targetNode = neighbors.find(n => n.id === targetId);
-    
-    if (targetNode) {
-        // 如果已连接但没剧情，强制补全
-        if (targetNode.is_linked && !targetNode.narrative) {
-            console.log("[Store] Narrative missing. Re-linking...");
-            // 🔥 修复点 3：这里现在可以安全地使用 await 和解构出来的 establishLink
-            await establishLink(targetId, targetNode.relation || 'auto', 'toggle');
-            return;
-        }
-
-        // 状态闪断逻辑，触发打字机重置
-        if (targetNode.narrative) {
-            set({ lastNarrative: null });
-            
-            // 延迟 10ms 重新赋值，确保 React 触发渲染更新
-            setTimeout(() => {
-                set({ lastNarrative: targetNode.narrative });
-            }, 10);
-            
-            // 清除“未读”红点标记
-            set((state) => ({
-                neighbors: state.neighbors.map(n => 
-                    n.id === targetId ? { ...n, hasUnseenLog: false } : n
-                )
-            }));
-        }
-    }
-  },
-  // ... 在 useGameStore 的实现中 ...
-
-  performDeepScan: async () => {
-    const { centerNode } = get();
-    if (!centerNode) return;
-    const word = centerNode.id;
-
-    set({ isScanning: true }); // 开始动画
-
-    try {
-        // 1. 触发后台任务 (立刻返回)
-        await axios.post('http://127.0.0.1:8000/node/deep_scan', { word });
-        
-        // 2. 开启轮询 (Polling)
-        // 每 2 秒查一次，看看有没有新邻居出来，持续 15 秒
-        let attempts = 0;
-        const maxAttempts = 8; // 16秒后停止
-        
-        const interval = setInterval(async () => {
-            attempts++;
-            
-            // 调用 graph/context 获取最新数据 (这时应该能读到后台存入 DB 的新连接了)
-            const res = await axios.post('http://127.0.0.1:8000/graph/context', { word });
-            const { neighbors } = res.data;
-            
-            // 比较邻居数量，如果有变化，说明后台任务有产出
-            const currentNeighbors = get().neighbors;
-            
-            // 更新状态 (无论有没有变，刷新一下总是好的，万一有新连接呢)
-            // 重新计算布局
-            const currentPos = get().centerNode!.position;
-            const layoutNeighbors = neighbors.map((n: any, index: number) => {
-                const total = neighbors.length;
-                const angle = (index / total) * Math.PI * 2;
-                return {
-                    ...n,
-                    position: [
-                        currentPos[0] + 18 * Math.cos(angle),
-                        0, 
-                        currentPos[2] + 18 * Math.sin(angle)
-                    ]
-                };
-            });
-            
-            set({ neighbors: layoutNeighbors });
-
-            // 如果发现新邻居变多了，或者超时了，停止轮询
-            if (neighbors.length > currentNeighbors.length || attempts >= maxAttempts) {
-                if (attempts >= maxAttempts) {
-                    set({ isScanning: false }); // 停止动画
-                    clearInterval(interval);
-                } else {
-                    // 如果发现了新东西，可以继续扫一会儿，或者停止
-                    // 这里选择继续扫，直到超时，保证所有结果都出来
-                }
-            }
-        }, 2000);
-
-    } catch (e) {
-        console.error("Deep scan trigger failed", e);
-        set({ isScanning: false });
-    }
-  },
-  // 在 return 对象中实现:
-  deleteCurrentNode: async () => {
-    const { centerNode } = get();
-    if (!centerNode) return;
-    
-    // 二次确认 (防止手滑)
-    if (!window.confirm(`WARNING: Initiate Voidout for "${centerNode.id}"?\n此操作不可逆，将永久删除该节点及所有连接。`)) {
-        return;
-    }
-
-    try {
-        // 1. 调用后端焚化接口
-        await axios.delete(`http://127.0.0.1:8000/node/${centerNode.id}`);
-        
-        // 2. 紧急折跃到安全屋 (Fernweh)
-        // 你也可以改成跳回上一个节点，这里为了简单直接回主城
-        await get().jumpTo("fernweh");
-        
-    } catch (e) {
-        console.error("Voidout failed:", e);
-        alert("销毁失败，数据残留。");
-    }
-  },
-
-  uploadFile: async (file) => {
-    const formData = new FormData();
-    formData.append('file', file);
-    try { 
-        await axios.post('http://127.0.0.1:8000/knowledge/upload', formData, { 
-            headers: { 'Content-Type': 'multipart/form-data' } 
-        }); 
-    } catch (e) { console.error(e); }
-  },
-  // 🔥 [核心实现] 战术笔记持久化
-  saveNote: async (noteContent: string) => {
-    const { centerNode } = get();
-    
-    // 1. 熔断检查：如果没有目标，无法记录
-    if (!centerNode) {
-      console.warn("[Store] No active node to attach note.");
-      return;
-    }
-
-    try {
-      // 2. 发送上行链路数据
-      // 对应后端 NoteRequest 模型: { word_id, note_content }
-      const res = await axios.post('http://127.0.0.1:8000/node/note', {
-        word_id: centerNode.id,
-        note_content: noteContent
-      });
-
-      if (res.data.status === "success") {
-        // 3. 同步本地状态
-        // 我们在本地也更新一下 centerNode 的 note 属性，确保 UI 立即响应
-        set((state) => ({
-          centerNode: state.centerNode ? { 
-            ...state.centerNode, 
-            note: noteContent 
-          } : null
-        }));
-        
-        console.log(`[SYSTEM] Note for ${centerNode.id} synchronized.`);
-      }
-    } catch (e) {
-      console.error("[Store] Failed to save note:", e);
-      // 这里可以预留一个全局错误提示状态
-    }
-  }
+export const useGameStore = create<GameState>((set, get) => ({
+  ...initialState,
+  ...createUISlice(set),
+  ...createMissionSlice(set, get),
+  ...createUserSlice(set, get),
+  ...createGraphSlice(set, get),
+  ...createKnowledgeSlice(set, get),
 }));
