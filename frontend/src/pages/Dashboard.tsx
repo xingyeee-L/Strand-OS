@@ -39,7 +39,7 @@ export default function Dashboard() {
   }, [initWorld]);
 
   return (
-    <div className="w-full h-screen bg-black overflow-hidden relative">
+    <div className="w-full h-screen bg-black overflow-hidden relative boot-enter">
       <Canvas shadows camera={{ position: [0, 60, 100], fov: 55 }} gl={{ antialias: false, preserveDrawingBuffer: true }}>
 
         {/* 🔥 1. 调亮环境色：背景由纯黑改为深灰色，防止对比度过激 */}

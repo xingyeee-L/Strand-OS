@@ -23,11 +23,11 @@ export default function MissionBoard() {
       {/* 
           外层容器：
           - top-24: 避让顶部 Header
-          - bottom-[13rem]: 🔥 关键：确保底部不接触对话框 (对话框 h-48 = 12rem)
+          - bottom-50: 确保底部不接触对话框 (DialogueBar h-50)
       */}
       <div 
           className={`
-              fixed top-24 bottom-[13rem] right-0 z-30 flex items-start pointer-events-auto
+              fixed top-24 bottom-60 right-0 z-30 flex items-start pointer-events-auto
               transition-transform duration-500 cubic-bezier(0.4, 0, 0.2, 1)
               ${isCollapsed ? 'translate-x-[calc(100%-3rem)]' : 'translate-x-0'}
           `}

@@ -16,6 +16,7 @@ frontend/node_modules/
 frontend/dist/
 frontend/dist-ssr/
 *.local
+frontend/.firebase/
 
 # --- 4. 系统与日志 (System & Logs) ---
 .DS_Store

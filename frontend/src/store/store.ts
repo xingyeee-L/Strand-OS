@@ -122,6 +122,8 @@ interface GameState {
   user: UserProfile;
   missions: Mission[];
   uiLang: UiLang;
+  isWorldReady: boolean;
+  isWorldBooting: boolean;
   
   // 状态标志
   isScanning: boolean;
@@ -270,15 +272,23 @@ const createUserSlice = (set: any, get: any) => ({
 
 const createGraphSlice = (set: any, get: any) => ({
   initWorld: async () => {
-    await get().jumpTo('Strand', [0, 0, 0]);
+    if (get().isWorldReady || get().isWorldBooting) return;
+    set({ isWorldBooting: true });
 
     try {
-      await apiClient.post('/missions/generate');
-    } catch (e) {
-      console.warn('[Mission] Failed to generate missions:', e);
-    }
+      await get().jumpTo('Strand', [0, 0, 0]);
 
-    await get().fetchMissions();
+      try {
+        await apiClient.post('/missions/generate');
+      } catch (e) {
+        console.warn('[Mission] Failed to generate missions:', e);
+      }
+
+      await get().fetchMissions();
+      set({ isWorldReady: true });
+    } finally {
+      set({ isWorldBooting: false });
+    }
   },
   jumpTo: async (word: string, targetPos?: [number, number, number], definition?: string) => {
     if (!word) return;
@@ -594,6 +604,8 @@ const initialState = {
   user: { level: 1, current_xp: 0, next_level_xp: 100 },
   missions: [],
   uiLang: getInitialUiLang(),
+  isWorldReady: false,
+  isWorldBooting: false,
   isScanning: false,
   isLinking: false,
   agentState: 'idle' as AgentState,
