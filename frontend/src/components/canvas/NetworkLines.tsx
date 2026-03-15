@@ -1,7 +1,7 @@
-import { useMemo, type ReactElement } from 'react';
+import { useMemo, useState, type ReactElement } from 'react';
 import { QuadraticBezierLine, Line } from '@react-three/drei';
 import * as THREE from 'three';
-import { useThree } from '@react-three/fiber'; // 🔥 引入场景访问权限
+import { useFrame, useThree } from '@react-three/fiber'; // 🔥 引入场景访问权限
 import { useGameStore } from '../../store/store';
 import { useShallow } from 'zustand/react/shallow';
 // getTerrainHeight 仅作为射线打不到时的兜底
@@ -30,6 +30,13 @@ export default function NetworkLines({ onHoverLink }: NetworkLinesProps) {
     useShallow((state) => ({ centerNode: state.centerNode, neighbors: state.neighbors })),
   );
   const { scene } = useThree(); // 获取 3D 场景
+  const [terrainReadyTick, setTerrainReadyTick] = useState(0);
+
+  useFrame(() => {
+    if (terrainReadyTick) return;
+    const terrainMesh = scene.getObjectByName('ground-mesh');
+    if (terrainMesh) setTerrainReadyTick(1);
+  });
 
   // 使用 useMemo 优化计算，依赖项加入 scene 确保地形加载后能重算
   const lines = useMemo(() => {
@@ -38,7 +45,8 @@ export default function NetworkLines({ onHoverLink }: NetworkLinesProps) {
 
     if (!typedCenterNode?.position) return [];
 
-    const terrainMesh = scene.getObjectByName('ground-mesh');
+    const terrainReady = terrainReadyTick === 1;
+    const terrainMesh = terrainReady ? scene.getObjectByName('ground-mesh') : null;
 
     const getTrueHeight = (x: number, z: number) => {
       if (terrainMesh) {
@@ -117,7 +125,7 @@ export default function NetworkLines({ onHoverLink }: NetworkLinesProps) {
     });
 
     return renderedLines;
-  }, [centerNode, neighbors, scene, onHoverLink]); // 依赖 scene
+  }, [centerNode, neighbors, scene, onHoverLink, terrainReadyTick]); // 依赖 scene
 
   return <>{lines}</>;
 }

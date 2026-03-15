@@ -3,8 +3,6 @@ import base64
 import logging
 from typing import Iterable, Optional
 
-import httpx
-
 from app.config.settings import settings
 
 
@@ -38,54 +36,9 @@ class OllamaProvider(BaseLLMProvider):
         return self._llm.invoke(prompt, stop=list(stop))
 
 
-class OpenAICompatibleProvider(BaseLLMProvider):
-    def __init__(self):
-        self._base_url = settings.OPENAI_BASE_URL.rstrip("/")
-        self._api_key = settings.OPENAI_API_KEY
-        self._model = settings.OPENAI_MODEL
-        self._timeout = settings.OPENAI_TIMEOUT
-
-    def invoke(
-        self, prompt: str, stop: Optional[Iterable[str]] = None, image_b64: Optional[str] = None
-    ) -> str:
-        headers = {"Content-Type": "application/json"}
-        if self._api_key:
-            headers["Authorization"] = f"Bearer {self._api_key}"
-
-        content = [{"type": "text", "text": prompt}]
-        if image_b64:
-            content.append(
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"},
-                }
-            )
-
-        payload = {
-            "model": self._model,
-            "messages": [{"role": "user", "content": content}],
-            "temperature": 0.2,
-        }
-
-        with httpx.Client(timeout=self._timeout) as client:
-            resp = client.post(f"{self._base_url}/chat/completions", headers=headers, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-            text = data["choices"][0]["message"]["content"]
-
-        if stop:
-            for token in stop:
-                if not token:
-                    continue
-                idx = text.find(token)
-                if idx != -1:
-                    text = text[:idx]
-        return text.strip()
-
-
 class GeminiProvider(BaseLLMProvider):
     def __init__(self):
-        api_key = settings.GOOGLE_API_KEY
+        api_key = settings.GOOGLE_API_KEY or settings.GEMINI_API_KEY
         if not api_key:
             raise ValueError("GOOGLE_API_KEY is not set for GeminiProvider")
 
@@ -159,9 +112,7 @@ def get_llm() -> BaseLLMProvider:
         return _provider
 
     llm_type = settings.LLM_TYPE.lower().strip()
-    if llm_type in {"openai", "cloud", "api"}:
-        _provider = OpenAICompatibleProvider()
-    elif llm_type in {"gemini", "google"}:
+    if llm_type in {"gemini", "google"}:
         fallback = OllamaProvider()
         try:
             _provider = ResilientProvider(primary=GeminiProvider(), fallback=fallback)

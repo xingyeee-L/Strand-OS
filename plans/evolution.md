@@ -161,7 +161,7 @@
 
 ### G5.1: 集成 GeminiProvider（Google GenAI）
 > 请在 `backend/app/core/llm_factory.py` 中新增 `GeminiProvider`，基于 `langchain-google-genai` 接入 Google Gemini。要求：
-> 1) 支持 `LLM_TYPE=gemini` 选择 Provider；保留现有 `ollama/openai` 行为
+> 1) 支持 `LLM_TYPE=gemini` 选择 Provider；必要时可降级 `ollama`
 > 2) 默认模型使用 `gemini-1.5-pro` 或 `gemini-2.5-flash`（通过环境变量覆盖）
 > 3) 统一 `invoke(prompt, stop)` 语义，确保 stop token 在 Gemini 返回后可稳定截断
 > 4) 环境变量设计：`GOOGLE_API_KEY`、`GEMINI_MODEL`、`GEMINI_TEMPERATURE`、`GEMINI_TIMEOUT`

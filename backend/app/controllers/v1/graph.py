@@ -103,7 +103,8 @@ def get_graph_context(request: ScanRequest, session: Session = Depends(get_sessi
                     }
 
     final_neighbors = []
-    for idx, (nid, data) in enumerate(neighbors_map.items()):
+    for idx, nid in enumerate(sorted(neighbors_map.keys())):
+        data = neighbors_map[nid]
         coord_json = BrainService.generate_distributed_coordinates(nid, idx)
         n_dict = data.copy()
         n_dict["position"] = json.loads(coord_json)
@@ -382,4 +383,3 @@ def handle_link_action_stream(req: LinkRequest, session: Session = Depends(get_s
         yield _sse({"type": "result", **payload.model_dump()})
 
     return StreamingResponse(event_gen(), media_type="text/event-stream")
-

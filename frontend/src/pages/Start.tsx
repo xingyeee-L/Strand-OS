@@ -8,6 +8,7 @@ const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(ma
 
 export default function Start({ onBoot }: { onBoot: () => void }) {
   const { initWorld, fetchBooks } = useGameStore();
+  const [started, setStarted] = useState(false);
   const [phase, setPhase] = useState<BootPhase>('sequence');
   const [sequenceDone, setSequenceDone] = useState(false);
   const [preloadDone, setPreloadDone] = useState(false);
@@ -30,6 +31,7 @@ export default function Start({ onBoot }: { onBoot: () => void }) {
   }, []);
 
   useEffect(() => {
+    if (!started) return;
     let cancelled = false;
     const start = performance.now();
 
@@ -48,9 +50,10 @@ export default function Start({ onBoot }: { onBoot: () => void }) {
       if (rafRef.current) window.cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     };
-  }, [bootDurationMs, phase]);
+  }, [bootDurationMs, phase, started]);
 
   useEffect(() => {
+    if (!started) return;
     let cancelled = false;
 
     const preload = async () => {
@@ -70,9 +73,10 @@ export default function Start({ onBoot }: { onBoot: () => void }) {
       cancelled = true;
       window.clearTimeout(seqTimer);
     };
-  }, [bootDurationMs, fetchBooks, initWorld]);
+  }, [bootDurationMs, fetchBooks, initWorld, started]);
 
   useEffect(() => {
+    if (!started) return;
     if (!sequenceDone) return;
     if (preloadDone) {
       setPhase('fade');
@@ -80,15 +84,16 @@ export default function Start({ onBoot }: { onBoot: () => void }) {
       return () => window.clearTimeout(t);
     }
     setPhase('hold');
-  }, [onBoot, preloadDone, sequenceDone]);
+  }, [onBoot, preloadDone, sequenceDone, started]);
 
   useEffect(() => {
+    if (!started) return;
     if (phase !== 'hold') return;
     if (!preloadDone) return;
     setPhase('fade');
     const t = window.setTimeout(onBoot, transitionMs);
     return () => window.clearTimeout(t);
-  }, [onBoot, phase, preloadDone]);
+  }, [onBoot, phase, preloadDone, started]);
 
   useEffect(() => {
     if (phase !== 'fade') {
@@ -109,7 +114,7 @@ export default function Start({ onBoot }: { onBoot: () => void }) {
     [bootDurationMs],
   );
 
-  const stage = progress < 0.22 ? 0 : progress < 0.48 ? 1 : progress < 0.74 ? 2 : 3;
+  const stage = started ? (progress < 0.22 ? 0 : progress < 0.48 ? 1 : progress < 0.74 ? 2 : 3) : -1;
   const doorClass =
     doorPhase === 'hidden' ? 'boot-door-hidden' : doorPhase === 'unlock' ? 'boot-door-unlock' : 'boot-door-open';
 
@@ -120,15 +125,15 @@ export default function Start({ onBoot }: { onBoot: () => void }) {
       className={`w-full h-screen bg-black overflow-hidden relative select-none ${phase === 'fade' ? 'opacity-0 transition-opacity duration-[720ms]' : 'opacity-100'}`}
     >
       <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_center,rgba(0,255,255,0.06)_0%,transparent_45%,rgba(0,0,0,0.95)_100%)]" />
-      <div className="absolute inset-0 pointer-events-none boot-noise" />
+      <div className={`absolute inset-0 pointer-events-none ${started ? 'boot-noise' : ''}`} />
       <div className="absolute inset-0 pointer-events-none opacity-20">
         <div className="w-full h-full bg-[linear-gradient(transparent_50%,rgba(0,0,0,1)_50%)] bg-[length:100%_4px]" />
       </div>
       <div className="absolute inset-0 pointer-events-none boot-grid opacity-40" />
 
       <div className="absolute inset-0 pointer-events-none">
-        <div className="absolute left-0 -top-24 w-full h-28 bg-cyan-500/20 blur-xl boot-sweep" />
-        <div className="absolute left-0 top-0 w-full h-24 bg-gradient-to-b from-cyan-500/8 to-transparent boot-fade-in" />
+        <div className={`absolute left-0 -top-24 w-full h-28 bg-cyan-500/20 blur-xl ${started ? 'boot-sweep' : ''}`} />
+        <div className={`absolute left-0 top-0 w-full h-24 bg-gradient-to-b from-cyan-500/8 to-transparent ${started ? 'boot-fade-in' : ''}`} />
       </div>
 
       <div className="absolute top-0 left-0 right-0 p-6 pointer-events-none">
@@ -145,25 +150,25 @@ export default function Start({ onBoot }: { onBoot: () => void }) {
 
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
         <div className="relative w-[520px] max-w-[92vw] aspect-square">
-          <div className="absolute inset-0 rounded-full border border-cyan-500/20 shadow-[0_0_60px_rgba(0,255,255,0.08)] boot-fade-in" />
-          <div className="absolute inset-[28px] rounded-full border border-cyan-500/10 boot-fade-in-delayed" />
-          <div className="absolute inset-[54px] rounded-full border border-orange-500/10 boot-fade-in-delayed-2" />
+          <div className={`absolute inset-0 rounded-full border border-cyan-500/20 shadow-[0_0_60px_rgba(0,255,255,0.08)] ${started ? 'boot-fade-in' : ''}`} />
+          <div className={`absolute inset-[28px] rounded-full border border-cyan-500/10 ${started ? 'boot-fade-in-delayed' : ''}`} />
+          <div className={`absolute inset-[54px] rounded-full border border-orange-500/10 ${started ? 'boot-fade-in-delayed-2' : ''}`} />
 
-          <div className="absolute inset-[22px] rounded-full border-t border-cyan-400/30 boot-spin-slow" />
-          <div className="absolute inset-[46px] rounded-full border-r border-orange-400/25 boot-spin-fast" />
+          <div className={`absolute inset-[22px] rounded-full border-t border-cyan-400/30 ${started ? 'boot-spin-slow' : ''}`} />
+          <div className={`absolute inset-[46px] rounded-full border-r border-orange-400/25 ${started ? 'boot-spin-fast' : ''}`} />
 
-          <div className="absolute left-1/2 top-1/2 w-[86%] h-[2px] -translate-x-1/2 -translate-y-1/2 bg-gradient-to-r from-transparent via-cyan-400/35 to-transparent boot-flicker" />
-          <div className="absolute left-1/2 top-1/2 w-[2px] h-[86%] -translate-x-1/2 -translate-y-1/2 bg-gradient-to-b from-transparent via-orange-400/22 to-transparent boot-flicker-delayed" />
+          <div className={`absolute left-1/2 top-1/2 w-[86%] h-[2px] -translate-x-1/2 -translate-y-1/2 bg-gradient-to-r from-transparent via-cyan-400/35 to-transparent ${started ? 'boot-flicker' : ''}`} />
+          <div className={`absolute left-1/2 top-1/2 w-[2px] h-[86%] -translate-x-1/2 -translate-y-1/2 bg-gradient-to-b from-transparent via-orange-400/22 to-transparent ${started ? 'boot-flicker-delayed' : ''}`} />
 
           <div className="absolute left-1/2 bottom-[18%] -translate-x-1/2 w-[72%] h-2 bg-black/40 border border-white/5 rounded overflow-hidden">
-            <div className="h-full bg-gradient-to-r from-cyan-500/30 via-cyan-400 to-orange-400 boot-progress" />
+            <div className={`h-full bg-gradient-to-r from-cyan-500/30 via-cyan-400 to-orange-400 ${started ? 'boot-progress' : ''}`} style={{ transform: started ? undefined : 'scaleX(0)' }} />
           </div>
 
           <div className="absolute inset-0">
-            <div className="absolute left-[12%] top-[18%] w-2 h-2 rounded-full bg-cyan-500/70 boot-pip" />
-            <div className="absolute right-[14%] top-[28%] w-1.5 h-1.5 rounded-full bg-orange-500/60 boot-pip-delayed" />
-            <div className="absolute left-[22%] bottom-[22%] w-1.5 h-1.5 rounded-full bg-cyan-500/50 boot-pip-delayed-2" />
-            <div className="absolute right-[18%] bottom-[18%] w-2 h-2 rounded-full bg-orange-500/55 boot-pip-delayed-3" />
+            <div className={`absolute left-[12%] top-[18%] w-2 h-2 rounded-full bg-cyan-500/70 ${started ? 'boot-pip' : ''}`} />
+            <div className={`absolute right-[14%] top-[28%] w-1.5 h-1.5 rounded-full bg-orange-500/60 ${started ? 'boot-pip-delayed' : ''}`} />
+            <div className={`absolute left-[22%] bottom-[22%] w-1.5 h-1.5 rounded-full bg-cyan-500/50 ${started ? 'boot-pip-delayed-2' : ''}`} />
+            <div className={`absolute right-[18%] bottom-[18%] w-2 h-2 rounded-full bg-orange-500/55 ${started ? 'boot-pip-delayed-3' : ''}`} />
           </div>
 
           <div className="absolute inset-0">
@@ -185,7 +190,7 @@ export default function Start({ onBoot }: { onBoot: () => void }) {
             />
           </div>
 
-          {phase === 'hold' && (
+          {started && phase === 'hold' && (
             <div className="absolute inset-0">
               <div className="absolute inset-[110px] rounded-full border border-cyan-500/12 boot-idle-pulse" />
               <div className="absolute inset-0 bg-cyan-500/5 boot-idle-flicker" />
@@ -196,10 +201,10 @@ export default function Start({ onBoot }: { onBoot: () => void }) {
 
       <div className="absolute inset-x-0 bottom-0 h-40 pointer-events-none">
         <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
-        <div className="absolute left-0 bottom-0 w-full h-24 bg-cyan-500/10 blur-2xl boot-engine-glow" />
+        <div className={`absolute left-0 bottom-0 w-full h-24 bg-cyan-500/10 blur-2xl ${started ? 'boot-engine-glow' : ''}`} />
       </div>
 
-      <div className={`absolute inset-0 pointer-events-none boot-door ${doorClass}`}>
+      <div className={`absolute inset-0 pointer-events-none boot-door ${started ? doorClass : 'boot-door-hidden'}`}>
         <div className="boot-door-left" />
         <div className="boot-door-right" />
         <div className="boot-door-latch boot-door-latch-left" />
@@ -208,6 +213,28 @@ export default function Start({ onBoot }: { onBoot: () => void }) {
         <div className="boot-door-bolt boot-door-bolt-bottom" />
         <div className="boot-door-seam" />
       </div>
+
+      {!started && (
+        <div className="absolute inset-0 flex items-end justify-center pb-16">
+          <button
+            type="button"
+            onClick={() => {
+              setStarted(true);
+              setPhase('sequence');
+              setSequenceDone(false);
+              setPreloadDone(false);
+              setProgress(0);
+            }}
+            className="pointer-events-auto group relative px-8 py-3 rounded-xl border border-cyan-500/30 bg-black/50 backdrop-blur-xl text-cyan-200 font-black tracking-[0.3em] uppercase shadow-[0_0_40px_rgba(0,255,255,0.08)] hover:border-cyan-400/60 hover:text-white transition-all"
+          >
+            <span className="absolute -inset-px rounded-xl bg-gradient-to-r from-transparent via-cyan-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+            <span className="relative flex items-center gap-3">
+              <span className="w-2 h-2 rounded-full bg-cyan-400 shadow-[0_0_16px_rgba(0,255,255,0.5)]" />
+              开始探索
+            </span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }

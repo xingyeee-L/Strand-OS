@@ -17,6 +17,7 @@ export default memo(function NodeMarker({ node, isActive, isRelated, onClick }: 
   const innerMesh = useRef<THREE.Mesh>(null);
   const outerMesh = useRef<THREE.Mesh>(null);
   const { scene } = useThree();
+  const didRaycastRef = useRef(false);
 
   const isHovered = useGameStore((state) => state.hoveredNodeId === node.id);
   const setHoveredNodeId = useGameStore((state) => state.setHoveredNodeId);
@@ -30,17 +31,23 @@ export default memo(function NodeMarker({ node, isActive, isRelated, onClick }: 
 
   // 射线检测
   useLayoutEffect(() => {
-    const terrainMesh = scene.getObjectByName('ground-mesh');
-    if (terrainMesh) {
-      const raycaster = new THREE.Raycaster();
-      raycaster.set(new THREE.Vector3(x, 100, z), new THREE.Vector3(0, -1, 0));
-      const hits = raycaster.intersectObject(terrainMesh);
-      if (hits.length > 0) setTerrainY(hits[0].point.y + 0.05);
-    }
-  }, [x, z, scene]);
+    didRaycastRef.current = false;
+    setTerrainY(mathY);
+  }, [x, z, scene, mathY]);
 
   // 动画
   useFrame((state, delta) => {
+    if (!didRaycastRef.current) {
+      const terrainMesh = scene.getObjectByName('ground-mesh');
+      if (terrainMesh) {
+        const raycaster = new THREE.Raycaster();
+        raycaster.set(new THREE.Vector3(x, 100, z), new THREE.Vector3(0, -1, 0));
+        const hits = raycaster.intersectObject(terrainMesh);
+        if (hits.length > 0) setTerrainY(hits[0].point.y + 0.05);
+        didRaycastRef.current = true;
+      }
+    }
+
     const speed = isActive || node.is_linked ? 2 : 0.5;
     const waveY = isFloating ? Math.sin(state.clock.elapsedTime * 1.5 + x) * 0.2 : 0;
 

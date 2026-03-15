@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="620" viewBox="0 0 1400 620">
+  <defs>
+    <linearGradient id="bg2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#070b16"/>
+      <stop offset="1" stop-color="#040713"/>
+    </linearGradient>
+
+    <pattern id="hatch2" patternUnits="userSpaceOnUse" width="12" height="12" patternTransform="rotate(25)">
+      <rect width="12" height="12" fill="transparent"/>
+      <line x1="0" y1="0" x2="0" y2="12" stroke="rgba(255,255,255,0.06)" stroke-width="6"/>
+    </pattern>
+
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="4" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <style>
+      .title{font:700 26px ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;fill:#e9f6ff;letter-spacing:1px}
+      .mono{font:700 18px ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New";fill:#e9f6ff;letter-spacing:0.5px}
+      .small{font:700 14px ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New";fill:rgba(233,246,255,0.72);letter-spacing:0.5px}
+      .line{stroke:rgba(233,246,255,0.25);stroke-width:2}
+      .dash{stroke-dasharray:6 6}
+      .panel{fill:rgba(16,22,38,0.55);stroke:rgba(233,246,255,0.16);stroke-width:2}
+      .panelHatch{fill:url(#hatch2);opacity:0.32}
+      .msg{fill:rgba(0,0,0,0.22);stroke:rgba(0,242,255,0.55);stroke-width:3}
+      .msg2{fill:rgba(0,0,0,0.22);stroke:rgba(255,170,0,0.55);stroke-width:3}
+      .arrow{stroke:rgba(233,246,255,0.35);stroke-width:3;fill:none}
+      .arrowHead{fill:rgba(233,246,255,0.35)}
+    </style>
+
+    <marker id="m2" viewBox="0 0 12 12" refX="10.5" refY="6" markerWidth="10" markerHeight="10" orient="auto-start-reverse">
+      <path d="M 0 0 L 12 6 L 0 12 z" class="arrowHead"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1400" height="620" fill="url(#bg2)"/>
+  <g opacity="0.18">
+    <rect x="0" y="0" width="1400" height="620" fill="url(#hatch2)"/>
+  </g>
+
+  <text class="title" x="60" y="62">Boot / Preload Sequence</text>
+
+  <g class="mono">
+    <text x="110" y="120">Boot</text>
+    <text x="360" y="120">Store</text>
+    <text x="650" y="120">API</text>
+    <text x="940" y="120">Gemini</text>
+    <text x="1220" y="120">DB</text>
+  </g>
+
+  <g class="line">
+    <line x1="120" y1="140" x2="120" y2="560"/>
+    <line x1="380" y1="140" x2="380" y2="560"/>
+    <line x1="680" y1="140" x2="680" y2="560"/>
+    <line x1="980" y1="140" x2="980" y2="560"/>
+    <line x1="1250" y1="140" x2="1250" y2="560"/>
+  </g>
+
+  <g class="panel" transform="translate(480,190)">
+    <rect width="800" height="290" rx="18"/>
+    <rect class="panelHatch" width="800" height="290" rx="18"/>
+    <text class="small" x="30" y="40">[Parallel Load]</text>
+  </g>
+
+  <path class="arrow" marker-end="url(#m2)" d="M 140 170 L 360 170"/>
+  <text class="small" x="165" y="155">initWorld()</text>
+
+  <g filter="url(#glow)">
+    <rect class="msg" x="430" y="240" width="340" height="56" rx="12"/>
+    <text class="mono" x="455" y="276">POST /graph/context</text>
+    <path class="arrow" marker-end="url(#m2)" d="M 770 268 L 670 268"/>
+
+    <path class="arrow" marker-end="url(#m2)" d="M 700 310 L 1220 310"/>
+    <text class="small" x="760" y="298">Fetch Graph Data</text>
+
+    <path class="arrow dash" marker-end="url(#m2)" d="M 700 350 L 940 350"/>
+    <text class="small" x="740" y="338">Generate Narrative</text>
+
+    <path class="arrow" marker-end="url(#m2)" d="M 670 388 L 780 388"/>
+    <text class="small" x="505" y="404">Payload OK</text>
+
+    <rect class="msg2" x="430" y="410" width="310" height="56" rx="12"/>
+    <text class="mono" x="455" y="446">GET /books/list</text>
+    <path class="arrow" marker-end="url(#m2)" d="M 740 438 L 670 438"/>
+    <text class="small" x="510" y="486">Book List OK</text>
+  </g>
+
+  <path class="arrow" marker-end="url(#m2)" d="M 140 520 L 360 520"/>
+  <text class="small" x="160" y="505">Transition to Dashboard</text>
+
+  <g class="mono" opacity="0.55">
+    <text x="110" y="592">Boot</text>
+    <text x="360" y="592">Store</text>
+    <text x="650" y="592">API</text>
+    <text x="940" y="592">Gemini</text>
+    <text x="1220" y="592">DB</text>
+  </g>
+</svg>

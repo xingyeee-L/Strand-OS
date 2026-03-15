@@ -39,7 +39,7 @@ export default function HUD() {
               onClick={() => setUiLang(uiLang === 'zh' ? 'en' : 'zh')}
               className="px-2 py-1 text-[10px] font-mono font-black tracking-widest border rounded bg-black/30 border-white/10 text-gray-300 hover:text-cyan-300 hover:border-cyan-500/40 transition-all"
             >
-              {uiLang === 'zh' ? 'EN' : '中文'}
+              {uiLang === 'zh' ? '中文' : 'EN'}
             </button>
           </div>
           <div className="text-2xl font-bold text-white">{t(uiLang, 'hud.level')}.{user.level}</div>

@@ -373,14 +373,14 @@ Strand/
 
 | 变量 | 默认值 | 作用 |
 |---|---|---|
-| `LLM_TYPE` | `ollama` | LLM Provider 选择：`ollama` / `openai` |
+| `LLM_TYPE` | `gemini` | LLM Provider 选择：`gemini` / `ollama`（Gemini 失败自动降级） |
 | `OLLAMA_MODEL` | `llama3.1` | 本地模型名称 |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama 服务地址 |
 | `OLLAMA_TIMEOUT` | `120` | 本地推理超时秒数 |
-| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | OpenAI-Compatible API 基址 |
-| `OPENAI_API_KEY` | 空 | 云端 API Key |
-| `OPENAI_MODEL` | `gpt-4o-mini` | 云端模型名 |
-| `OPENAI_TIMEOUT` | `60` | 云端请求超时秒数 |
+| `GOOGLE_API_KEY` | 空 | Gemini API Key（Google GenAI SDK） |
+| `GEMINI_MODEL` | `gemini-2.5-pro` | Gemini 模型名 |
+| `GEMINI_TEMPERATURE` | `0.2` | 生成温度 |
+| `GEMINI_TIMEOUT` | `60` | 云端请求超时秒数 |
 | `DISTILL_MODE` | `heuristic` | 蒸馏模式：`heuristic` / `llm` / `off` |
 | `VECTOR_STORE_DISABLED` | 空 | 单测/离线：禁用向量库（dummy store） |
 
@@ -572,83 +572,42 @@ def get_vector_store():
     return _vector_store
 ```
 
-### 15.3 LLM Provider：本地 Ollama / 云端 OpenAI-Compatible 可切换
+### 15.3 LLM Provider：Google Gemini（官方 SDK）+ 本地 Ollama 兜底
 
 ```python
-# 功能: 抽象 LLM 调用接口，并通过环境变量切换 provider
-# 文件: /Users/lijunyi/Code/Strand/backend/app/core/llm_factory.py
-# 行号: L1-L78
-# 关键逻辑:
-# - LLM_TYPE=ollama/openai
-# - OpenAICompatibleProvider 走 /chat/completions 协议
-# - get_llm() 返回单例 provider，避免重复初始化
-import os
 from abc import ABC, abstractmethod
 from typing import Iterable, Optional
-import httpx
+
+from app.config.settings import settings
+
 
 class BaseLLMProvider(ABC):
     @abstractmethod
     def invoke(self, prompt: str, stop: Optional[Iterable[str]] = None) -> str:
         raise NotImplementedError
 
-class OllamaProvider(BaseLLMProvider):
+
+class GeminiProvider(BaseLLMProvider):
     def __init__(self):
-        model = os.getenv("OLLAMA_MODEL", "llama3.1")
-        base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-        timeout = float(os.getenv("OLLAMA_TIMEOUT", "120"))
-        try:
-            from langchain_ollama import OllamaLLM as Ollama
-        except ImportError:
-            from langchain_community.llms import Ollama
-        self._llm = Ollama(model=model, base_url=base_url, timeout=timeout)
+        api_key = settings.GOOGLE_API_KEY
+        if not api_key:
+            raise ValueError("GOOGLE_API_KEY is not set for GeminiProvider")
+
+        from google import genai
+        from google.genai import types
+
+        self._types = types
+        self._client = genai.Client(api_key=api_key)
+        self._model = settings.GEMINI_MODEL
+        self._temperature = settings.GEMINI_TEMPERATURE
 
     def invoke(self, prompt: str, stop: Optional[Iterable[str]] = None) -> str:
-        if stop is None:
-            return self._llm.invoke(prompt)
-        return self._llm.invoke(prompt, stop=list(stop))
-
-class OpenAICompatibleProvider(BaseLLMProvider):
-    def __init__(self):
-        self._base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
-        self._api_key = os.getenv("OPENAI_API_KEY", "")
-        self._model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-        self._timeout = float(os.getenv("OPENAI_TIMEOUT", "60"))
-
-    def invoke(self, prompt: str, stop: Optional[Iterable[str]] = None) -> str:
-        headers = {"Content-Type": "application/json"}
-        if self._api_key:
-            headers["Authorization"] = f"Bearer {self._api_key}"
-        payload = {
-            "model": self._model,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.2,
-        }
-        with httpx.Client(timeout=self._timeout) as client:
-            resp = client.post(f"{self._base_url}/chat/completions", headers=headers, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-            text = data["choices"][0]["message"]["content"]
+        cfg_kwargs = {"temperature": self._temperature}
         if stop:
-            for token in stop:
-                if not token:
-                    continue
-                idx = text.find(token)
-                if idx != -1:
-                    text = text[:idx]
-        return text.strip()
-
-_provider: Optional[BaseLLMProvider] = None
-def get_llm() -> BaseLLMProvider:
-    global _provider
-    if _provider is not None:
-        return _provider
-    llm_type = os.getenv("LLM_TYPE", "ollama").lower().strip()
-    if llm_type in {"openai", "cloud", "api"}:
-        _provider = OpenAICompatibleProvider()
-    else:
-        _provider = OllamaProvider()
-    return _provider
+            cfg_kwargs["stop_sequences"] = [s for s in stop if s]
+        config = self._types.GenerateContentConfig(**cfg_kwargs)
+        resp = self._client.models.generate_content(model=self._model, contents=prompt, config=config)
+        return (getattr(resp, "text", None) or "").strip()
 ```
 
 ### 15.4 资料蒸馏：heuristic / LLM / off
