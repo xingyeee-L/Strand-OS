@@ -4,9 +4,23 @@ Strand OS is a spaceship-style multimodal cognitive agent for vocabulary learnin
 It renders your knowledge graph as an interactive 3D star map, while a tactical AI copilot (Gemini) drives retrieval, reasoning, and mission guidance.  
 During boot, a cinematic sequence preloads graph state and missions so the first interaction is instant and immersive.
 
+<p align="center">
+  <a href="#architecture-diagram">Architecture</a> ·
+  <a href="#quick-start-reproducible-testing">Quick Start</a> ·
+  <a href="#technology-stack">Stack</a> ·
+  <a href="#gcp-deployment-proof">GCP Proof</a> ·
+  <a href="JOURNEY.md">Journey</a>
+</p>
+
 ## Architecture Diagram
 
-![Architecture](docs/diagrams/architecture.svg)
+<p align="center">
+  <img alt="Architecture Overview" src="docs/diagrams/mermaid-diagram-2026-03-15-005326_%E5%89%AF%E6%9C%AC.png" width="900" />
+</p>
+
+<p align="center">
+  <img alt="Boot & Preload Sequence" src="docs/diagrams/mermaid-diagram-2026-03-15-005337_%E5%89%AF%E6%9C%AC.png" width="900" />
+</p>
 
 ## Quick Start (Reproducible Testing)
 
